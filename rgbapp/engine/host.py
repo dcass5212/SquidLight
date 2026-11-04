@@ -24,7 +24,7 @@ import numpy as np
 
 from .backend import Backoff, ConnectionState
 from .compositor import BLEND_MODES, LayerSpec
-from .core import Engine
+from .core import Engine, zone_key
 from .devices import DeviceGroup
 from .effects import get_effect_class
 
@@ -40,6 +40,8 @@ class GroupSettings:
     layers: list[LayerSpec] = field(default_factory=list)
     brightness: float = 1.0
     enabled: bool = True
+    # Mirror the keyboard's dominant effect onto this group (ignored for the keyboard itself).
+    sync_keyboard: bool = False
     # layer id -> effect id -> params, so switching a layer's effect away and back
     # keeps the user's colors
     remembered: dict[str, dict[str, dict]] = field(default_factory=dict)
@@ -88,6 +90,7 @@ class EngineHost:
         self._phase = "idle"  # idle | starting | failed | running | stopping | stopped
         self._fail_reason = ""
         self._retry_at = 0.0
+        self._revision = 0  # bumps on every change to what the user set (drives "unsaved changes")
         self._generation = 0  # bumps each time the engine comes up (groups may change)
         self._stop_evt = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -96,11 +99,17 @@ class EngineHost:
         self._store = store
         self._save_delay = save_delay
         self._save_timer: Optional[threading.Timer] = None
+        self._resize_thread: Optional[threading.Thread] = None
+        self._resize_pending: dict[tuple[str, str], int] = {}
         if store is not None:
             try:
                 self._master, self._settings = store.load()
             except Exception:
                 log.exception("could not load saved settings; starting fresh")
+            try:
+                engine.zone_sizes.update(store.load_zone_sizes())
+            except Exception:
+                log.exception("could not load saved LED counts")
 
     # -- lifecycle
 
@@ -129,6 +138,9 @@ class EngineHost:
         thread = self._thread
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout)
+        resizer = self._resize_thread
+        if resizer is not None and resizer is not threading.current_thread():
+            resizer.join(timeout)
         try:
             self.engine.stop()
         except Exception:
@@ -212,6 +224,30 @@ class EngineHost:
     def settings(self, key: str) -> GroupSettings:
         with self._lock:
             return copy.deepcopy(self._settings_locked(key))
+
+    @property
+    def store(self):
+        return self._store
+
+    @property
+    def revision(self) -> int:
+        return self._revision
+
+    def snapshot(self) -> tuple[float, dict[str, GroupSettings]]:
+        """A copy of everything a profile holds: master brightness and every group's settings."""
+        with self._lock:
+            return self._master, copy.deepcopy(self._settings)
+
+    def replace_settings(self, master: float, groups: dict[str, GroupSettings]) -> None:
+        """Swap in a whole profile (profile switch). Applied to the hardware right away when
+        the engine is up, otherwise when it comes up. Groups the profile doesn't mention get
+        the default effect."""
+        with self._lock:
+            self._master = float(min(max(master, 0.0), 1.0))
+            self._settings = copy.deepcopy(groups)
+            self._touch_locked()
+            if self._running():
+                self._apply_all_locked()
 
     @property
     def master_brightness(self) -> float:
@@ -311,6 +347,47 @@ class EngineHost:
                 spec.mask = mask if isinstance(mask, str) else list(mask)
             self._apply_layers_locked(key)
 
+    def set_sync_keyboard(self, key: str, sync: bool) -> None:
+        """Make ``key`` follow the keyboard's dominant effect (or go back to its own layers)."""
+        if key == "keyboard":
+            return
+        with self._lock:
+            self._settings_locked(key).sync_keyboard = bool(sync)
+            self._apply_layers_locked(key)
+
+    def zone_size(self, device_id: str, zone_name: str) -> Optional[int]:
+        """The saved LED count for a zone, or None if the user never set one."""
+        return self.engine.zone_sizes.get(zone_key(device_id, zone_name))
+
+    def set_zone_size(self, device_id: str, zone_name: str, size: int) -> None:
+        """Set an ARGB zone's LED count. Saved right away; applied on a worker thread
+        because it means device I/O (the engine rebuilds its groups and generation bumps)."""
+        size = max(0, int(size))
+        with self._lock:
+            self.engine.zone_sizes[zone_key(device_id, zone_name)] = size
+            self._touch_locked()
+            if not self._running():
+                return  # applied when the engine comes up
+            self._resize_pending[(device_id, zone_name)] = size
+            if self._resize_thread is None or not self._resize_thread.is_alive():
+                self._resize_thread = threading.Thread(target=self._run_resizes, name="engine-resize", daemon=True)
+                self._resize_thread.start()
+
+    def _run_resizes(self) -> None:
+        while True:
+            with self._lock:
+                if not self._resize_pending or not self._running():
+                    self._resize_pending.clear()
+                    return
+                (device_id, zone_name), size = next(iter(self._resize_pending.items()))
+                del self._resize_pending[(device_id, zone_name)]
+            try:
+                self.engine.resize_zone(device_id, zone_name, size, configure=self._configure)
+            except _Cancelled:
+                return
+            except Exception:
+                log.exception("could not resize %s", zone_name)
+
     def set_brightness(self, key: str, value: float) -> None:
         with self._lock:
             self._settings_locked(key).brightness = float(min(max(value, 0.0), 1.0))
@@ -365,10 +442,32 @@ class EngineHost:
     def _push_layers_locked(self, key: str) -> None:
         # Copies: the render thread keeps what it is given while the UI edits ours.
         # Layer ids are stable, so effects keep their animation state across edits.
-        self.engine.set_layers(key, copy.deepcopy(self._settings[key].layers))
+        self.engine.set_layers(key, copy.deepcopy(self._effective_layers_locked(key)))
+
+    def _effective_layers_locked(self, key: str) -> list[LayerSpec]:
+        """What actually renders: the group's own layers, or the keyboard's dominant effect
+        when the group is synced to it."""
+        s = self._settings[key]
+        if s.sync_keyboard and key != "keyboard":
+            dominant = self._dominant_keyboard_layer_locked()
+            if dominant is not None:
+                mirror = copy.deepcopy(dominant)
+                mirror.id = f"sync-{key}"
+                mirror.mask, mirror.opacity, mirror.blend, mirror.visible = "all", 1.0, "normal", True
+                return [mirror]
+        return s.layers
+
+    def _dominant_keyboard_layer_locked(self) -> Optional[LayerSpec]:
+        """The topmost visible effect layer on the keyboard. Painted layers don't count:
+        a per-key picture has no effect to carry over."""
+        kb = self._settings.get("keyboard")
+        if kb is None:
+            return None
+        return next((l for l in reversed(kb.layers) if l.visible and l.effect != "static_keys"), None)
 
     def _touch_locked(self) -> None:
         """Something the user set changed: save soon (restarting the timer while they drag)."""
+        self._revision += 1
         if self._store is None or self._phase in ("stopping", "stopped"):
             return
         if self._save_timer is not None:
@@ -381,10 +480,15 @@ class EngineHost:
         with self._lock:
             self._save_timer = None
             master, snapshot = self._master, copy.deepcopy(self._settings)
+            sizes = dict(self.engine.zone_sizes)
         try:
             self._store.save(master, snapshot)
         except Exception:
             log.exception("could not save settings")
+        try:
+            self._store.save_zone_sizes(sizes)
+        except Exception:
+            log.exception("could not save LED counts")
 
     def _flush_save(self) -> None:
         with self._lock:
@@ -398,6 +502,10 @@ class EngineHost:
         if not self._running() or not self._known(key):
             return
         self._push_layers_locked(key)
+        if key == "keyboard":  # groups synced to it follow every keyboard edit
+            for other, st in self._settings.items():
+                if st.sync_keyboard and other != key and self._known(other):
+                    self._push_layers_locked(other)
 
     def _apply_all_locked(self) -> None:
         self.engine.set_master_brightness(self._master)

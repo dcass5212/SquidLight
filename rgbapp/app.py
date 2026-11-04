@@ -66,6 +66,7 @@ class App(QObject):
             return
         self._quitting = True
         log.info("quitting: restoring devices")
+        self.bridge.stop()  # no more rule-driven switches while shutting down
         self.window.allow_close = True
         self.window.hide()
         self.tray.hide()
@@ -73,6 +74,7 @@ class App(QObject):
         QTimer.singleShot(QUIT_TIMEOUT_MS, self.qapp.quit)
 
     def _about_to_quit(self) -> None:
+        self.bridge.stop()
         if not self._quitting:  # e.g. Windows is logging off: stop off-thread, wait briefly
             self._quitting = True
             self.host.stop_async().join(10.0)

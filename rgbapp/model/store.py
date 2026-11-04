@@ -1,8 +1,10 @@
 """Load and save the user's lighting setup as ``profiles.json`` (docs/03 "Data formats").
 
-Until profiles arrive (M6) there is exactly one profile, "Default", holding every device
-group's layer stack and brightness. Other profiles and rules found in the file are kept
-untouched, so M6 can take the file over as it is.
+``profiles`` holds the saved profiles; ``rules`` the auto-switch rules. What the user is
+editing right now (the "working copy") is stored under ``working`` and saved continuously,
+so a restart picks up where they left off; it only becomes part of a profile on an explicit
+Save (see ``model/profiles.py``). ``active_profile_id`` says which profile the working copy
+came from. A file with no ``working`` key (older versions) loads the active profile.
 
 Writes are atomic (temp file, then rename) and keep one ``.bak``. A missing or broken
 file loads as "nothing saved" and the broken one is left in place as the ``.bak`` source.
@@ -13,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -25,6 +28,7 @@ log = logging.getLogger(__name__)
 
 VERSION = 1
 FILE_NAME = "profiles.json"
+HARDWARE_FILE_NAME = "hardware.json"
 
 
 def layer_to_json(spec: LayerSpec) -> dict:
@@ -54,67 +58,138 @@ def layer_from_json(raw: dict) -> LayerSpec:
     return spec
 
 
+def state_to_json(master: float, groups: dict[str, GroupSettings]) -> dict:
+    """The part of a profile that is lighting state (shared by profiles and the working copy)."""
+    return {
+        "master_brightness": master,
+        "devices": {
+            key: {
+                "brightness": s.brightness,
+                "enabled": s.enabled,
+                "sync_keyboard": s.sync_keyboard,
+                "layers": [layer_to_json(spec) for spec in s.layers],
+            }
+            for key, s in groups.items()
+        },
+    }
+
+
+def state_from_json(raw: dict) -> tuple[float, dict[str, GroupSettings]]:
+    groups: dict[str, GroupSettings] = {}
+    devices = raw.get("devices")
+    for key, dev in (devices.items() if isinstance(devices, dict) else ()):
+        if not isinstance(dev, dict):
+            continue
+        layers = []
+        for item in dev.get("layers", []):
+            try:
+                layers.append(layer_from_json(item))
+            except (KeyError, TypeError, ValueError, AttributeError):
+                log.warning("profiles.json: skipped a bad layer on %s: %r", key, item)
+        groups[key] = GroupSettings(
+            layers=layers,
+            brightness=float(min(max(dev.get("brightness", 1.0), 0.0), 1.0)),
+            enabled=bool(dev.get("enabled", True)),
+            sync_keyboard=bool(dev.get("sync_keyboard", False)),
+        )
+    try:
+        master = float(min(max(raw.get("master_brightness", 1.0), 0.0), 1.0))
+    except (TypeError, ValueError):
+        master = 1.0
+    return master, groups
+
+
 class SettingsStore:
     def __init__(self, path: Optional[Path] = None) -> None:
         self.path = Path(path) if path else data_dir() / FILE_NAME
+        self._lock = threading.RLock()
 
     # -- reading
 
     def load(self) -> tuple[float, dict[str, GroupSettings]]:
-        """``(master_brightness, {group key: settings})``; empty when nothing usable is saved."""
+        """The working copy: ``(master_brightness, {group key: settings})``; empty when nothing
+        usable is saved."""
         doc = self._read()
-        profile = self._default_profile(doc)
-        if profile is None:
+        if not doc:
             return 1.0, {}
-        groups: dict[str, GroupSettings] = {}
-        for key, raw in (profile.get("devices") or {}).items():
-            layers = []
-            for item in raw.get("layers", []):
-                try:
-                    layers.append(layer_from_json(item))
-                except (KeyError, TypeError, ValueError):
-                    log.warning("profiles.json: skipped a bad layer on %s: %r", key, item)
-            groups[key] = GroupSettings(
-                layers=layers,
-                brightness=float(min(max(raw.get("brightness", 1.0), 0.0), 1.0)),
-                enabled=bool(raw.get("enabled", True)),
-            )
-        master = float(min(max(profile.get("master_brightness", 1.0), 0.0), 1.0))
-        return master, groups
+        working = doc.get("working")
+        if isinstance(working, dict):
+            return state_from_json(working)
+        profile = self.active_profile(doc)
+        return state_from_json(profile) if profile is not None else (1.0, {})
 
     # -- writing
 
     def save(self, master: float, groups: dict[str, GroupSettings]) -> None:
-        doc = self._read() or {}
-        profiles = [p for p in doc.get("profiles", []) if isinstance(p, dict)]
-        current = self._default_profile(doc)
-        if current is None:
-            current = {"id": uuid.uuid4().hex, "name": "Default"}
-            profiles.insert(0, current)
-            doc["default_profile_id"] = current["id"]
-        current["master_brightness"] = master
-        current["devices"] = {
-            key: {
-                "brightness": s.brightness,
-                "enabled": s.enabled,
-                "layers": [layer_to_json(spec) for spec in s.layers],
-            }
-            for key, s in groups.items()
-        }
-        doc["version"] = VERSION
-        doc["profiles"] = profiles
-        doc.setdefault("rules", [])
-        self._write(doc)
+        """Save the working copy. The very first save also creates the "Default" profile."""
 
-    # -- internals
+        def apply(doc: dict) -> None:
+            self.ensure_profiles(doc, master, groups)
+            doc["working"] = state_to_json(master, groups)
+
+        self.update(apply)
+
+    # -- the whole document, for ProfileManager. Read-modify-write is serialized by a lock
+    #    because the host's save timer and the GUI thread both write.
+
+    def read_doc(self) -> dict:
+        with self._lock:
+            return self._read() or {}
+
+    def update(self, fn) -> None:
+        with self._lock:
+            doc = self._read() or {}
+            fn(doc)
+            doc["version"] = VERSION
+            if not isinstance(doc.get("profiles"), list):
+                doc["profiles"] = []
+            if not isinstance(doc.get("rules"), list):
+                doc["rules"] = []
+            self._write(doc)
 
     @staticmethod
-    def _default_profile(doc: Optional[dict]) -> Optional[dict]:
+    def ensure_profiles(doc: dict, master: float = 1.0, groups: Optional[dict] = None) -> None:
+        """Make sure at least one profile exists (a "Default" holding the given state)."""
+        profiles = [p for p in doc.get("profiles", []) if isinstance(p, dict)]
+        if not profiles:
+            default = {"id": uuid.uuid4().hex, "name": "Default", **state_to_json(master, groups or {})}
+            profiles = [default]
+            doc["default_profile_id"] = default["id"]
+        doc["profiles"] = profiles
+        if not any(p.get("id") == doc.get("default_profile_id") for p in profiles):
+            doc["default_profile_id"] = profiles[0].get("id")
+        if not any(p.get("id") == doc.get("active_profile_id") for p in profiles):
+            doc["active_profile_id"] = doc["default_profile_id"]
+        doc.setdefault("rules", [])
+
+    @staticmethod
+    def active_profile(doc: Optional[dict]) -> Optional[dict]:
         if not doc:
             return None
         profiles = [p for p in doc.get("profiles", []) if isinstance(p, dict)]
-        wanted = doc.get("default_profile_id")
-        return next((p for p in profiles if p.get("id") == wanted), profiles[0] if profiles else None)
+        for wanted in (doc.get("active_profile_id"), doc.get("default_profile_id")):
+            hit = next((p for p in profiles if p.get("id") == wanted), None)
+            if hit is not None:
+                return hit
+        return profiles[0] if profiles else None
+
+    # -- LED counts of ARGB zones: a property of the wiring, so not part of any profile
+
+    @property
+    def hardware_path(self) -> Path:
+        return self.path.with_name(HARDWARE_FILE_NAME)
+
+    def load_zone_sizes(self) -> dict[str, int]:
+        doc = _HardwareFile(self.hardware_path)._read() or {}
+        sizes = doc.get("zone_sizes")
+        if not isinstance(sizes, dict):
+            return {}
+        return {str(k): int(v) for k, v in sizes.items() if isinstance(v, int) and v >= 0}
+
+    def save_zone_sizes(self, sizes: dict[str, int]) -> None:
+        _HardwareFile(self.hardware_path)._write({"version": VERSION, "zone_sizes": dict(sizes)})
+
+    # -- internals
 
     def _read(self) -> Optional[dict]:
         for path in (self.path, self.path.with_name(self.path.name + ".bak")):
@@ -146,3 +221,28 @@ class SettingsStore:
             except OSError:
                 log.warning("could not refresh %s.bak", self.path.name)
         os.replace(tmp, self.path)
+
+
+class _HardwareFile(SettingsStore):
+    """hardware.json shares the atomic write and ``.bak`` handling of the profiles file."""
+
+
+class MemoryStore(SettingsStore):
+    """Same interface, nothing on disk: for the fake backend and tests."""
+
+    def __init__(self) -> None:
+        super().__init__(Path("memory-only.json"))
+        self._doc: Optional[dict] = None
+        self._zone_sizes: dict[str, int] = {}
+
+    def _read(self) -> Optional[dict]:
+        return json.loads(json.dumps(self._doc)) if self._doc is not None else None
+
+    def _write(self, doc: dict) -> None:
+        self._doc = json.loads(json.dumps(doc))
+
+    def load_zone_sizes(self) -> dict[str, int]:
+        return dict(self._zone_sizes)
+
+    def save_zone_sizes(self, sizes: dict[str, int]) -> None:
+        self._zone_sizes = dict(sizes)

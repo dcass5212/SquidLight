@@ -20,6 +20,8 @@ from .keyboard_canvas import KeyboardCanvas, make_preview
 from .layers_panel import LayersPanel
 from .paint_panel import PaintPanel
 from .theme import T
+from .widgets import LedPreview
+from .zone_panel import ZonePanel
 from .widgets import DeviceControls
 
 
@@ -49,6 +51,13 @@ class DevicePage(QWidget):
         note = QLabel(f"{group.name}, {group.led_count} LEDs.{hint}")
         note.setObjectName("Caption")
         body.addWidget(note)
+        # Memory, Mainboard and the like: zones to pick, size and color (M5)
+        self.zones: ZonePanel | None = None
+        if isinstance(self.preview, LedPreview) and group.zone_refs:
+            self.preview.selectable = True
+            self.preview.empty_text = "Set an LED count for a header below to light it"
+            self.zones = ZonePanel(bridge, group)
+            body.addWidget(self.zones)
         left.addLayout(body, 1)
 
         bar = QFrame()
@@ -70,6 +79,12 @@ class DevicePage(QWidget):
             self.right.addWidget(self.paint)
         row.addWidget(self.right)
 
+        if self.zones is not None:
+            self.zones.zone_selected.connect(self._zone_selected)
+            self.zones.layer_added.connect(self.layers.select)
+            self.zones.sync_changed.connect(self._sync_changed)
+            self.preview.led_pressed.connect(self._led_pressed)
+            self._sync_changed(bridge.settings(group.key).sync_keyboard)
         bridge.frames.connect(self._on_frames)
         bridge.health_changed.connect(lambda h: self.preview.set_dimmed(h.get(self.key) == "paused"))
         self._show_mask(self.layers.selected_spec())
@@ -117,9 +132,28 @@ class DevicePage(QWidget):
         if frame is not None:
             self.preview.set_frame(frame)
 
+    # -- zones (non-keyboard devices)
+
+    def _zone_selected(self, ref) -> None:
+        self.preview.set_outline(None if ref is None else ref.indices)
+
+    def _led_pressed(self, led: int) -> None:
+        for ref in self.group.zone_refs:
+            if led in set(ref.indices.tolist()):
+                self.zones.select(None if self.zones.selected_ref() is ref else ref.name)
+                return
+
+    def _sync_changed(self, synced: bool) -> None:
+        # a synced group renders the keyboard's effect, so its own layers would do nothing
+        self.layers.setEnabled(not synced)
+
     def _show_mask(self, spec) -> None:
         """Outline the keys the selected layer applies to (nothing when it is all of them)."""
         if not isinstance(self.preview, KeyboardCanvas):
+            if self.zones is not None and self.zones.selected_ref() is None:
+                self.preview.set_outline(
+                    None if spec is None or spec.mask == "all" else self.group.resolve_mask(spec.mask).nonzero()[0]
+                )
             return
         if spec is None or spec.mask == "all":
             self.preview.set_outline(None)

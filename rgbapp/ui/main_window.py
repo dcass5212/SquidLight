@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -20,7 +21,8 @@ from PySide6.QtWidgets import (
 
 from .dashboard import DashboardPage
 from .device_page import DevicePage
-from .placeholder_pages import ProfilesPage, SettingsPage
+from .placeholder_pages import SettingsPage
+from .profiles_page import ProfilesPage, switch_profile
 from .sidebar import DASHBOARD, PROFILES, SETTINGS, Sidebar, device_page_id
 from .theme import T, status_color
 from .tray import make_icon
@@ -93,11 +95,23 @@ class MainWindow(QMainWindow):
         hrow.addStretch(1)
         self.chip = StatusChip()
         hrow.addWidget(self.chip)
+        self.unsaved = QLabel("● Unsaved changes")
+        self.unsaved.setObjectName("Caption")
+        self.unsaved.setStyleSheet(f"color: {T.warn};")
+        self.unsaved.setAccessibleName("Unsaved changes to this profile")
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setToolTip("Keep these changes in the active profile")
+        self.save_btn.clicked.connect(bridge.save_profile)
+        self.revert_btn = QPushButton("Revert")
+        self.revert_btn.setToolTip("Throw away changes and go back to the saved profile")
+        self.revert_btn.clicked.connect(bridge.revert_profile)
+        for w in (self.unsaved, self.save_btn, self.revert_btn):
+            hrow.addWidget(w)
         self.profile = QComboBox()
         self.profile.setAccessibleName("Profile")
-        self.profile.addItem("Default")
         self.profile.setMinimumWidth(160)
         self.profile.setToolTip("Active profile")
+        self.profile.activated.connect(self._profile_picked)
         hrow.addWidget(self.profile)
         content.addWidget(header)
 
@@ -107,7 +121,7 @@ class MainWindow(QMainWindow):
         self.dashboard = DashboardPage(bridge)
         self.dashboard.open_device.connect(lambda key: self.show_page(device_page_id(key)))
         self._add_page(DASHBOARD, self.dashboard)
-        self._add_page(PROFILES, ProfilesPage())
+        self._add_page(PROFILES, ProfilesPage(bridge))
         self._add_page(SETTINGS, SettingsPage(bridge))
         self._titles = {DASHBOARD: "Dashboard", PROFILES: "Profiles", SETTINGS: "Settings"}
 
@@ -117,8 +131,31 @@ class MainWindow(QMainWindow):
         bridge.status_changed.connect(self.chip.set_status)
         self.chip.set_status(bridge.status)
         self._on_groups(bridge.groups)
+        bridge.profiles_changed.connect(self._refresh_profiles)
+        bridge.dirty_changed.connect(self._refresh_dirty)
+        self._refresh_profiles()
 
         QShortcut(QKeySequence("Ctrl+W"), self, activated=self.close)
+
+    # -- profiles
+
+    def _refresh_profiles(self) -> None:
+        mgr = self.bridge.profiles
+        self.profile.blockSignals(True)
+        self.profile.clear()
+        for p in mgr.profiles:
+            self.profile.addItem(p.name, p.id)
+        self.profile.setCurrentIndex(max(self.profile.findData(mgr.active_id), 0))
+        self.profile.blockSignals(False)
+        self._refresh_dirty(self.bridge.dirty)
+
+    def _refresh_dirty(self, dirty: bool) -> None:
+        for w in (self.unsaved, self.save_btn, self.revert_btn):
+            w.setVisible(dirty)
+
+    def _profile_picked(self, index: int) -> None:
+        if not switch_profile(self.bridge, self.profile.itemData(index), self):
+            self._refresh_profiles()  # cancelled: show the active one again
 
     # -- pages
 

@@ -106,6 +106,7 @@ class LedPreview(QWidget):
     """Live picture of what a device group is showing, drawn from the engine's output."""
 
     activated = Signal()
+    led_pressed = Signal(int)  # LED index under a click (when ``selectable``)
 
     MAX_PITCH = 30.0
 
@@ -119,6 +120,9 @@ class LedPreview(QWidget):
         self._geom_key = None
         self._rects: list[QRectF] = []
         self._glow_rect = QRectF()
+        self._outline: set[int] = set()  # LEDs to ring (the selected zone)
+        self.empty_text = "No LEDs"
+        self.selectable = False
         self.setMinimumHeight(96)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         if clickable:
@@ -144,11 +148,37 @@ class LedPreview(QWidget):
             self._dimmed = dimmed
             self.update()
 
+    def set_outline(self, indices) -> None:
+        new = set() if indices is None else {int(i) for i in indices}
+        if new != self._outline:
+            self._outline = new
+            self.update()
+
+    def led_at(self, pos) -> Optional[int]:
+        self._geometry()
+        # nearest LED within one pitch: the dots are small, clicks should be forgiving
+        best, best_d = None, 1e18
+        for i, r in enumerate(self._rects):
+            d = (r.center().x() - pos.x()) ** 2 + (r.center().y() - pos.y()) ** 2
+            if d < best_d:
+                best, best_d = i, d
+        if best is None:
+            return None
+        limit = max(self._rects[best].width(), 8.0) * 1.5
+        return best if best_d <= limit * limit else None
+
     # -- input
 
     def focusInEvent(self, e) -> None:
         track_focus_reason(self, e)
         super().focusInEvent(e)
+
+    def mousePressEvent(self, e) -> None:
+        if self.selectable and e.button() == Qt.LeftButton:
+            led = self.led_at(e.position())
+            if led is not None:
+                self.led_pressed.emit(led)
+        super().mousePressEvent(e)
 
     def mouseReleaseEvent(self, e) -> None:
         if self._clickable and e.button() == Qt.LeftButton and self.rect().contains(e.position().toPoint()):
@@ -202,7 +232,7 @@ class LedPreview(QWidget):
 
         if self._group is None or not self._group.led_count:
             p.setPen(qcolor(T.muted))
-            p.drawText(self.rect(), Qt.AlignCenter, "No LEDs")
+            p.drawText(self.rect(), Qt.AlignCenter | Qt.TextWordWrap, self.empty_text)
             return
 
         self._geometry()
@@ -227,6 +257,12 @@ class LedPreview(QWidget):
         for rect, (r, g, b), on in zip(self._rects, frame.tolist(), lit.tolist()):
             p.setBrush(QColor(r, g, b) if on else off)
             p.drawRoundedRect(rect, self._radius, self._radius)
+        if self._outline:
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(qcolor(T.accent), 1.5))
+            for i in self._outline:
+                if i < len(self._rects):
+                    p.drawRoundedRect(self._rects[i].adjusted(-1.5, -1.5, 1.5, 1.5), self._radius, self._radius)
         p.restore()
 
         if self._clickable and keyboard_focused(self):

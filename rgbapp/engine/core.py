@@ -18,6 +18,11 @@ from .openrgb_manager import OpenRGBManager
 log = logging.getLogger(__name__)
 
 
+def zone_key(device_id: str, zone_name: str) -> str:
+    """Stable key for a zone in saved settings."""
+    return f"{device_id}|{zone_name}"
+
+
 class Engine:
     def __init__(
         self,
@@ -30,6 +35,9 @@ class Engine:
         self.config = config or LoopConfig()
         self.loop: Optional[RenderLoop] = None
         self._started = False
+        # Saved ARGB LED counts, {zone_key(device_id, zone name): count}, applied on every
+        # connect (OpenRGB forgets them when it restarts).
+        self.zone_sizes: dict[str, int] = {}
 
     # -- lifecycle
 
@@ -49,6 +57,7 @@ class Engine:
                     raise BackendError(self.manager.reason or "OpenRGB is not available")
                 self.manager.start_supervisor()
             self.backend.connect()
+            self._apply_zone_sizes()
             groups = build_groups(self.backend.devices())
             if not groups:
                 log.warning("OpenRGB reported no controllable devices with LEDs")
@@ -60,6 +69,47 @@ class Engine:
         except Exception:
             self.stop()  # undo whatever came up
             raise
+
+    def _apply_zone_sizes(self) -> None:
+        for dev in self.backend.devices():
+            for z in dev.zones:
+                want = self.zone_sizes.get(zone_key(dev.id, z.name))
+                if want is None or not z.resizable or want == z.size:
+                    continue
+                try:
+                    self.backend.resize_zone(dev.id, z.name, max(z.min_size, min(want, z.max_size)))
+                except BackendError as exc:
+                    log.warning("could not set %s to %d LEDs: %s", z.name, want, exc)
+
+    def resize_zone(
+        self, device_id: str, zone_name: str, size: int, configure: Optional[Callable[["Engine"], None]] = None
+    ) -> None:
+        """Change an ARGB zone's LED count while running: pause rendering, resize, rebuild the
+        groups and restart the loop. ``configure`` re-applies the user's settings to the new
+        groups (as in ``start``). Blocking device I/O: call it off the GUI thread. The loop
+        is always restarted, even when the resize fails (the error is then re-raised)."""
+        if self.loop is None:
+            raise RuntimeError("engine is not running")
+        self.zone_sizes[zone_key(device_id, zone_name)] = size
+        old = self.loop
+        paused = old.paused
+        old.stop()
+        error: Optional[BaseException] = None
+        try:
+            self.backend.resize_zone(device_id, zone_name, size)
+        except BackendError as exc:
+            error = exc
+            log.warning("resize of %s failed: %s", zone_name, exc)
+        self.loop = RenderLoop(self.backend, build_groups(self.backend.devices()), self.config)
+        try:
+            if configure is not None:
+                configure(self)
+            if paused:
+                self.loop.pause()
+        finally:
+            self.loop.start()
+        if error is not None:
+            raise error
 
     def stop(self) -> None:
         """Stop rendering, restore every device's original mode, stop OpenRGB if ours."""

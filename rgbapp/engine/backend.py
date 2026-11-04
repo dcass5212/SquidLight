@@ -10,7 +10,7 @@ from __future__ import annotations
 import enum
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Optional, Protocol, runtime_checkable
 
 import numpy as np
@@ -35,6 +35,13 @@ class ZoneInfo:
     kind: str = "linear"  # "linear" | "matrix" | "single"
     # matrix_map[row][col] = LED index within the device, or None for an empty cell
     matrix_map: Optional[tuple[tuple[Optional[int], ...], ...]] = None
+    # Resizable zones (ARGB headers) can be given a LED count; max_size 0 means "not resizable".
+    min_size: int = 0
+    max_size: int = 0
+
+    @property
+    def resizable(self) -> bool:
+        return self.max_size > self.min_size
 
 
 @dataclass(frozen=True)
@@ -62,6 +69,10 @@ class Backend(Protocol):
 
     def write(self, device_id: str, colors: np.ndarray) -> None:
         """Send one frame, ``colors`` shape (n, 3) uint8. Raises BackendError."""
+
+    def resize_zone(self, device_id: str, zone_name: str, size: int) -> None:
+        """Set an ARGB zone's LED count; ``devices()`` then reports the new layout.
+        Raises BackendError if the zone is unknown, not resizable, or the size is out of range."""
 
     def maintain(self) -> bool:
         """Called regularly by the loop. Reconnects if needed (with backoff).
@@ -108,6 +119,9 @@ def _k70_names() -> list[str]:
     return []
 
 
+FAKE_HEADER_MAX = 120  # the fake board's ARGB headers take 0..120 LEDs
+
+
 class FakeBackend:
     """In-memory backend that mirrors this machine's devices (see docs/04).
 
@@ -134,6 +148,7 @@ class FakeBackend:
         self._wanted = False  # like OpenRGBBackend: reconnect only between connect() and close()
         self._clock = clock
         self._devices = self._build(keyboard_leds, ram_sticks, ram_leds, board_zone_sizes)
+        self.resizes: list[tuple[str, str, int]] = []  # (device_id, zone name, size), for tests
 
     @staticmethod
     def _build(kb: int, sticks: int, ram_leds: int, board: tuple[int, ...]) -> list[DeviceInfo]:
@@ -150,7 +165,7 @@ class FakeBackend:
             )
         zones, start = [], 0
         for i, size in enumerate(board):
-            zones.append(ZoneInfo(f"Addressable RGB Header {i + 1}", start, size))
+            zones.append(ZoneInfo(f"Addressable RGB Header {i + 1}", start, size, min_size=0, max_size=FAKE_HEADER_MAX))
             start += size
         devs.append(
             DeviceInfo(
@@ -210,6 +225,20 @@ class FakeBackend:
             )
         self.writes.append((device_id, colors.copy(), self._clock()))
 
+    def resize_zone(self, device_id: str, zone_name: str, size: int) -> None:
+        if self.state is not ConnectionState.CONNECTED:
+            raise BackendError("fake: not connected")
+        dev = self._by_id(device_id)
+        zone = next((z for z in dev.zones if z.name == zone_name), None)
+        if zone is None or not zone.resizable:
+            raise BackendError(f"fake: {zone_name!r} on {dev.name} cannot be resized")
+        if not zone.min_size <= size <= zone.max_size:
+            raise BackendError(f"fake: size {size} outside {zone.min_size}..{zone.max_size}")
+        self._devices = [
+            _with_zone_size(d, zone_name, size) if d.id == device_id else d for d in self._devices
+        ]
+        self.resizes.append((device_id, zone_name, size))
+
     def maintain(self) -> bool:
         if not self._wanted or self.state is ConnectionState.CONNECTED:
             return False
@@ -237,6 +266,17 @@ class FakeBackend:
             if d.id == device_id:
                 return d
         raise BackendError(f"fake: unknown device {device_id}")
+
+
+def _with_zone_size(dev: DeviceInfo, zone_name: str, size: int) -> DeviceInfo:
+    """Copy of ``dev`` with one zone resized: later zones shift, LED names are renumbered."""
+    zones, start = [], 0
+    for z in dev.zones:
+        n = size if z.name == zone_name else z.size
+        zones.append(replace(z, start=start, size=n))
+        start += n
+    names = tuple(f"Header LED {i}" for i in range(start)) if dev.type == "motherboard" else dev.led_names
+    return replace(dev, zones=tuple(zones), led_names=names)
 
 
 # --------------------------------------------------------------------------- OpenRGB
@@ -282,6 +322,9 @@ class OpenRGBBackend:
         self._client = None
         self._states: dict[str, _DeviceState] = {}
         self._infos: list[DeviceInfo] = []
+        # (device index, zone name) -> (min, max) LEDs. openrgb-python drops these from its
+        # Zone objects, so they are read from the raw controller packets (see _capture_limits).
+        self._limits: dict[tuple[int, str], tuple[int, int]] = {}
         self._backoff = Backoff()
         self._next_attempt = 0.0
         self._wanted = False  # True between connect() and close(): reconnect only then
@@ -310,6 +353,7 @@ class OpenRGBBackend:
         try:
             client = self._make_client()
             self._settle(client)
+            self._capture_limits(client)
             states = self._enter_direct(client)
         except BackendError:
             raise
@@ -340,12 +384,34 @@ class OpenRGBBackend:
                 log.info("OpenRGB device count changed %d -> %d while settling", last, count)
                 last, stable_since = count, self._clock()
 
+    def _capture_limits(self, client) -> None:
+        """Record each zone's LED-count limits. The library discards them when it builds
+        its objects, so tap the packet callback and ask for every device's data again."""
+        self._limits = {}
+        try:
+            from openrgb.utils import PacketType
+
+            comms = client.comms
+            original = comms.callback
+
+            def tap(device, ptype, data):
+                if ptype == PacketType.REQUEST_CONTROLLER_DATA:
+                    for z in getattr(data, "zones", None) or []:
+                        self._limits[(device, z.name)] = (int(z.leds_min), int(z.leds_max))
+                return original(device, ptype, data)
+
+            comms.callback = tap
+            for i in range(len(client.devices)):
+                comms.requestDeviceData(i)
+        except Exception as exc:  # fakes in tests, protocol changes: zones just aren't resizable
+            log.warning("could not read zone size limits: %s", exc)
+
     def _enter_direct(self, client) -> dict[str, _DeviceState]:
         from openrgb.utils import ModeColors
 
         states: dict[str, _DeviceState] = {}
         for index, dev in enumerate(client.devices):
-            info = _describe(dev, index, set(states))
+            info = _describe(dev, index, set(states), limits=self._limits)
             prev_mode = int(dev.active_mode)
             prev_colors = list(dev.colors)
             prev_per_led = dev.modes[prev_mode].color_mode == ModeColors.PER_LED
@@ -413,6 +479,37 @@ class OpenRGBBackend:
             self._mark_disconnected(str(exc))
             raise BackendError(f"write to {st.info.name} failed: {exc}") from exc
 
+    def resize_zone(self, device_id: str, zone_name: str, size: int) -> None:
+        if self.state is not ConnectionState.CONNECTED:
+            raise BackendError("not connected")
+        st = self._states.get(device_id)
+        if st is None:
+            raise BackendError(f"unknown device {device_id}")
+        index = next((i for i, z in enumerate(st.info.zones) if z.name == zone_name), None)
+        if index is None or not st.info.zones[index].resizable:
+            raise BackendError(f"{zone_name!r} on {st.info.name} cannot be resized")
+        zone = st.info.zones[index]
+        if not zone.min_size <= size <= zone.max_size:
+            raise BackendError(f"{size} LEDs is outside {zone.min_size}..{zone.max_size} for {zone_name}")
+        try:
+            st.device.zones[index].resize(size)
+            self._client.update()  # refresh every device's LED list from the server
+            dev = self._client.devices[self._index_of(st.device)]
+        except Exception as exc:
+            self._mark_disconnected(str(exc))
+            raise BackendError(f"resize of {zone_name} failed: {exc}") from exc
+        info = _describe(dev, self._index_of(dev), set(), dev_id=device_id, limits=self._limits)
+        st.device, st.info = dev, replace(info, writable=st.info.writable)
+        st.prev_colors, st.prev_per_led = [], False  # old colors no longer fit this layout
+        self._infos = [s.info for s in self._states.values()]
+        log.info("resized %s / %s to %d LEDs", st.info.name, zone_name, size)
+
+    def _index_of(self, dev) -> int:
+        for i, d in enumerate(self._client.devices):
+            if d is dev or d.id == dev.id:
+                return i
+        raise BackendError("device disappeared after resize")
+
     def close(self) -> None:
         """Restore every device we touched, then disconnect."""
         self._wanted = False
@@ -442,7 +539,9 @@ def _replace_writable(info: DeviceInfo, writable: bool) -> DeviceInfo:
     return DeviceInfo(info.id, info.name, info.type, info.led_names, info.zones, writable)
 
 
-def _describe(dev, index: int, taken: set[str]) -> DeviceInfo:
+def _describe(
+    dev, index: int, taken: set[str], dev_id: Optional[str] = None, limits: Optional[dict] = None
+) -> DeviceInfo:
     """Build a DeviceInfo from an openrgb-python Device.
 
     The id is derived from the type and OpenRGB's device location (unique per device,
@@ -451,7 +550,7 @@ def _describe(dev, index: int, taken: set[str]) -> DeviceInfo:
     dtype = getattr(dev.type, "name", str(dev.type)).lower()
     location = getattr(getattr(dev, "metadata", None), "location", "") or ""
     base = f"{dtype}:{location}" if location else f"{dtype}:{dev.name}:{index}"
-    dev_id, n = base, 1
+    dev_id, n = dev_id or base, 1
     while dev_id in taken:  # identical location strings; keep ids unique anyway
         n += 1
         dev_id = f"{base}#{n}"
@@ -468,7 +567,8 @@ def _describe(dev, index: int, taken: set[str]) -> DeviceInfo:
                 tuple(None if (v is None or v >= 0xFFFF_FFF0) else start + int(v) for v in row)
                 for row in raw
             )
-        zones.append(ZoneInfo(z.name, start, size, ztype, matrix))
+        lo, hi = (limits or {}).get((index, z.name), (0, 0))
+        zones.append(ZoneInfo(z.name, start, size, ztype, matrix, lo, hi))
         start += size
 
     has_direct = any(m.name.lower() == "direct" for m in dev.modes)

@@ -1,5 +1,5 @@
-"""Profiles (M6) and Settings (M8) until those milestones; Settings already shows the
-connection details and where the log lives."""
+"""Settings (M8) until that milestone; it already shows the connection details and where
+the log lives."""
 
 from __future__ import annotations
 
@@ -26,21 +26,6 @@ def _section(title: str, body: str) -> QFrame:
     col.addWidget(b)
     box.body = b  # type: ignore[attr-defined]
     return box
-
-
-class ProfilesPage(QWidget):
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        col = QVBoxLayout(self)
-        col.setContentsMargins(T.unit * 3, T.unit * 3, T.unit * 3, T.unit * 3)
-        col.addWidget(
-            _section(
-                "Default",
-                "Everything you set on the dashboard belongs to this profile. Saving several profiles "
-                "and switching them per app is not built yet.",
-            )
-        )
-        col.addStretch(1)
 
 
 class SettingsPage(QWidget):

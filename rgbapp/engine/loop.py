@@ -259,6 +259,8 @@ class RenderLoop:
         if not connected:
             return
         for device_id, colors in rt.group.split(frame):
+            if len(colors) == 0:  # an ARGB header with no LEDs set yet: nothing to send
+                continue
             last = rt.last_sent.get(device_id)
             if last is not None and np.array_equal(last, colors):
                 self.stats.skipped_unchanged += 1

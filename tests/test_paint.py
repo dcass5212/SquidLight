@@ -172,7 +172,8 @@ def test_store_uses_the_documented_profile_format_and_keeps_other_profiles(tmp_p
     SettingsStore(path).save(1.0, {"keyboard": GroupSettings(layers=[LayerSpec("static")])})
     doc = json.loads(path.read_text())
     assert doc["version"] == 1 and doc["rules"] == rules
-    assert doc["profiles"][0]["id"] == "x" and "keyboard" in doc["profiles"][0]["devices"]
+    # autosave goes to the working copy; the saved profile is untouched until the user saves
+    assert doc["profiles"] == [other] and "keyboard" in doc["working"]["devices"]
 
 
 def test_store_survives_missing_and_broken_files(tmp_path):

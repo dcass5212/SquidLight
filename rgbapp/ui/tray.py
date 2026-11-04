@@ -55,10 +55,10 @@ class Tray(QObject):
         self.open_action.triggered.connect(self.open_requested)
         menu.addSeparator()
 
-        profiles = menu.addMenu("Profile")
-        default = profiles.addAction("Default")
-        default.setCheckable(True)
-        default.setChecked(True)
+        self.profile_menu = menu.addMenu("Profile")
+        self._profile_group = QActionGroup(self)
+        self._profile_group.setExclusive(True)
+        self.profile_actions: dict[str, QAction] = {}
 
         bright = menu.addMenu("Master brightness")
         self._bright_group = QActionGroup(self)
@@ -85,6 +85,8 @@ class Tray(QObject):
         bridge.paused_changed.connect(self._sync_paused)
         bridge.status_changed.connect(lambda s: self.icon.setToolTip(f"SquidLight\n{s.text}"))
         self._sync_brightness(bridge.host.master_brightness)
+        bridge.profiles_changed.connect(self._rebuild_profiles)
+        self._rebuild_profiles()
 
     @staticmethod
     def available() -> bool:
@@ -102,6 +104,28 @@ class Tray(QObject):
     def _activated(self, reason) -> None:
         if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
             self.open_requested.emit()
+
+    def _rebuild_profiles(self) -> None:
+        mgr = self.bridge.profiles
+        for act in self.profile_actions.values():
+            self._profile_group.removeAction(act)
+        self.profile_menu.clear()
+        self.profile_actions = {}
+        for p in mgr.profiles:
+            act = self.profile_menu.addAction(p.name)
+            act.setCheckable(True)
+            act.setChecked(p.id == mgr.active_id)
+            act.triggered.connect(lambda _=False, pid=p.id: self._choose_profile(pid))
+            self._profile_group.addAction(act)
+            self.profile_actions[p.id] = act
+
+    def _choose_profile(self, profile_id: str) -> None:
+        # Unsaved edits would be lost by switching: the same Save / Discard / Cancel question
+        # as in the window, even when the window is hidden.
+        from .profiles_page import switch_profile
+
+        if not switch_profile(self.bridge, profile_id):
+            self._rebuild_profiles()
 
     def _sync_brightness(self, value: float) -> None:
         pct = int(round(value * 100))

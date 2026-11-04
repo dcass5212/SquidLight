@@ -23,6 +23,18 @@ _GROUP_KEYS = {"keyboard": "keyboard", "dram": "memory", "motherboard": "mainboa
 # Types whose devices are merged into one group; everything else gets one group each.
 _MERGED = {"dram"}
 
+@dataclass(frozen=True)
+class ZoneRef:
+    """One zone of a group, as the zone UI and masks see it."""
+
+    name: str  # unique within the group: what a layer mask uses
+    label: str  # for people: "Stick 2", "Addressable RGB Header 1"
+    device_id: str
+    device_zone: str  # the zone's own name on its device (what the backend resizes by)
+    info: ZoneInfo
+    indices: np.ndarray  # LED indices within the group
+
+
 Mask = Union[str, Sequence[int], Sequence[str]]  # "all" | LED indices | zone names
 
 
@@ -47,6 +59,7 @@ class DeviceGroup:
         self.members: tuple[Member, ...] = tuple(members)
         self.led_count = offset
         self.led_names: tuple[str, ...] = tuple(n for d in devices for n in d.led_names)
+        self.zone_refs: list[ZoneRef] = []
         self.zones: dict[str, np.ndarray] = self._zone_indices()
         # A physical key layout, when one fits (single-device groups only: the keyboard).
         self.layout: Optional[DeviceLayout] = match_layout(self.led_names) if len(self.members) == 1 else None
@@ -94,13 +107,17 @@ class DeviceGroup:
 
     def _zone_indices(self) -> dict[str, np.ndarray]:
         zones: dict[str, np.ndarray] = {}
-        for m in self.members:
+        for member_no, m in enumerate(self.members, start=1):
             for z in m.device.zones:
                 name, n = z.name, 2
                 while name in zones:  # two RAM sticks both have a zone called "Corsair DRAM"
                     name = f"{z.name} ({n})"
                     n += 1
-                zones[name] = np.arange(m.offset + z.start, m.offset + z.start + z.size)
+                idx = np.arange(m.offset + z.start, m.offset + z.start + z.size)
+                zones[name] = idx
+                # a merged group of identical devices (RAM sticks) reads best as "Stick 2"
+                label = f"Stick {member_no}" if m.device.type == "dram" and len(self.members) > 1 else z.name
+                self.zone_refs.append(ZoneRef(name, label, m.device.id, z.name, z, idx))
         return zones
 
     def mask_choices(self) -> list[str]:
@@ -176,14 +193,15 @@ def _normalize(pos: np.ndarray) -> np.ndarray:
 
 
 def build_groups(devices: Sequence[DeviceInfo]) -> list[DeviceGroup]:
-    """Group writable devices that have LEDs. Zero-LED devices (the board until the
-    user sets header lengths in M5) are skipped with a log line."""
+    """Group writable devices. A device with no LEDs is skipped, unless it has a zone
+    whose LED count the user can set (the board's ARGB headers report 0 until they do):
+    it gets an empty group so its page exists and the count can be entered."""
     buckets: dict[str, list[DeviceInfo]] = {}
     for dev in devices:
         if not dev.writable:
             log.warning("skipping %s: not controllable (no Direct mode)", dev.name)
             continue
-        if dev.led_count == 0:
+        if dev.led_count == 0 and not any(z.resizable for z in dev.zones):
             log.info("skipping %s: it reports 0 LEDs", dev.name)
             continue
         base = _GROUP_KEYS.get(dev.type, dev.type)

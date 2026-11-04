@@ -12,9 +12,10 @@ def test_fake_backend_mirrors_the_real_machine():
     assert len(board.zones) == 3 and board.zones[1].size > 0
 
 
-def test_groups_merge_ram_and_skip_zero_led_devices():
+def test_groups_merge_ram_and_keep_an_empty_board_with_resizable_zones():
     groups = {g.key: g for g in build_groups(FakeBackend(board_zone_sizes=(0, 0, 0)).devices())}
-    assert set(groups) == {"keyboard", "memory"}  # board has no LEDs yet
+    assert set(groups) == {"keyboard", "memory", "mainboard"}  # empty board: its page sets the counts
+    assert groups["mainboard"].led_count == 0
     assert groups["memory"].led_count == 20
     assert [m.offset for m in groups["memory"].members] == [0, 10]
 

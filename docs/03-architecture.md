@@ -86,6 +86,22 @@ The UI builds its property editors from `params`. Inputs start only while a visi
 - The canvas owns key selection (click, Shift-add, Ctrl-toggle, drag box, row via the Row tool or Alt-click, Ctrl+A, Esc) and the eyedropper; a multi-LED keycap is always selected whole.
 - Persistence: `model/store.py` writes `profiles.json` in the format below with a single "Default" profile (layer stacks, brightness and on/off per group, plus master brightness). `EngineHost` loads it at construction and saves debounced (about 0.5 s) off the caller's thread, and flushes on stop. Other profiles and rules in the file are preserved. M6 builds profile CRUD on this file. `--backend fake` does not read or write it.
 
+## Other devices (as built, M5)
+- **ARGB LED counts.** `Backend.resize_zone(device_id, zone_name, size)`; `ZoneInfo` gained `min_size`/`max_size` (`resizable` = max > min). openrgb-python drops a zone's `leds_min/leds_max`, so `OpenRGBBackend` taps the packet callback and re-requests device data to read them. A device with no LEDs but a resizable zone (the board) still gets an empty `DeviceGroup`, so its page exists to enter the count; the loop skips writing empty frames.
+- **Applying counts.** Counts are saved in `hardware.json` (same folder and atomic-write rules as `profiles.json`; `{"zone_sizes": {"<device id>|<zone name>": n}}`), not in a profile, because they describe wiring. `Engine.start` applies them after connecting (OpenRGB forgets them on restart). Changing one while running goes `EngineHost.set_zone_size` -> worker thread `Engine.resize_zone`: stop the loop, resize, rebuild groups, re-apply settings, restart the loop. The host's `generation` bumps, so the bridge emits `groups_changed` and the pages rebuild.
+- **Zones UI.** `ui/zone_panel.py` sits under the preview of any non-keyboard group with zones: select (outlines it in the preview; clicking an LED selects its zone), LED count + Set for resizable zones, a color swatch and an Effect menu. A zone's color or effect is a normal layer with that zone as its mask, so it also appears in the layers panel. RAM sticks are labeled "Stick N".
+- **Sync with keyboard.** `GroupSettings.sync_keyboard` (saved per group in the profile). While on, the group renders one layer: a copy of the keyboard's topmost visible non-paint layer (mask all, opacity 1, normal blend), re-pushed on every keyboard edit. The group's own layers are kept and come back when it is turned off. If the keyboard has only a painted layer, nothing is mirrored and the group keeps its own layers. The layers panel is disabled while synced.
+- **Case.** The case lights and fans are Addressable RGB Header 1 on the board (docs/04), so they are a zone on the Mainboard page and not a separate group.
+
+## Profiles and rules (as built, M6)
+- **Working copy vs profile.** Edits stay live and autosave (the M4 debounce) into `working` in `profiles.json`, so a restart restores unsaved work. A profile changes only on an explicit **Save**; **Revert** reloads it. `active_profile_id` records which profile the working copy came from. `ProfileManager.dirty` compares the live state to the saved one, ignoring layer ids and device groups still at their untouched default (so a device appearing later is not an "edit"). Files from before M6 (no `working`) load the active profile.
+- **`model/profiles.py` (`ProfileManager`, no Qt)**: create (from the current lighting, becomes active), duplicate (saved state), rename (unique names), delete (the last one is kept; rules for it are dropped; default/active move on), set default, import/export (`{"version":1,"profile":{name, master_brightness, devices}}`; imports get a fresh id and a unique name), activate/save/revert, and the rules list. `EngineHost.replace_settings` swaps in a whole profile and applies it to the hardware; `host.revision` drives the dirty check.
+- **`SettingsStore`** gained `read_doc`/`update` (read-modify-write under a lock, since the host's save timer and the GUI both write) and `MemoryStore` for `--backend fake`.
+- **Rules (`engine/rules.py`).** `{"match": "game.exe", "profile_id": "...", "focused": false}`; first match in list order wins; process names are case-insensitive and `.exe` is optional. `focused: true` means only while its window is the foreground app (Win32 via ctypes). `RulesWatcher` polls psutil about once a second (about 15 ms per poll; it does nothing when there are no rules) and acts only when the *matched rule* changes: a match activates its profile, losing the match activates the default profile, and no change leaves the profile alone. So a manual choice sticks, and changing the default doesn't switch anything. At startup a running matching app switches the profile; no match keeps the restored one. The thread emits a queued signal; the switch itself runs on the GUI thread.
+- **Unsaved edits.** A manual switch (header, Profiles page, tray) asks Save / Discard / Cancel. A rule-driven switch does **not** ask and discards unsaved edits to the previous profile.
+- **UI.** Header: profile dropdown, plus an "Unsaved changes" dot with Save and Revert while dirty. `ui/profiles_page.py`: profile list and actions; rules editor with a running-program picker, profile choice, "only when in front", reorder and remove. Tray: Profile submenu. After any switch the bridge re-emits `groups_changed`, so the dashboard and device pages rebuild from the new state.
+- Not built: profile icons and thumbnails.
+
 ## Data formats (JSON, versioned with `"version": 1`)
 `profiles.json`:
 ```json
@@ -100,7 +116,9 @@ The UI builds its property editors from `params`. Inputs start only while a visi
      }}
   ],
   "rules": [{"match": "valorant.exe", "profile_id": "uuid"}],
-  "default_profile_id": "uuid"
+  "default_profile_id": "uuid",
+  "active_profile_id": "uuid",
+  "working": {"master_brightness": 1.0, "devices": {}}
 }
 ```
 `settings.json`: OpenRGB path and port, accent color, autostart, rate cap, audio device, and similar. Write atomically (write a temp file, then rename) and keep one `.bak`.
