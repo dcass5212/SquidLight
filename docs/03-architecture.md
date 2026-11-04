@@ -75,8 +75,16 @@ The UI builds its property editors from `params`. Inputs start only while a visi
 ## Keyboard layout mapping
 - `layouts/k70_pro_ansi.json` maps **OpenRGB LED names** (e.g. "Key: A") to x, y, w, h in key units.
 - At startup, match the device's LED names to the layout. Unmatched LEDs go into a fallback strip so nothing is silently dropped; log a warning with the unmatched names.
+- As built (M3): the file lists LEDs in device order, each with `name`, `label`, `x, y, w, h`, a `region` (used as a mask name, e.g. "Number pad") and an optional `cap` (LEDs sharing a cap draw as one keycap: the 3-LED spacebar). Names repeat, so an LED matches by `(name, occurrence)`. The best-fitting file is used if it places at least half of a device's LEDs (`engine/layout.py`).
 - Build this file after seeing the real LED names in milestone 0; don't guess them.
 - For non-key devices, derive a simple layout from zones (linear, or matrix if OpenRGB provides one).
+
+## Paint mode (as built, M4)
+- Painting edits one "Static per-key" layer (effect id `static_keys`, hidden from the effect library). Its only param is `colors`, a hidden `ledmap` param: `{"<led index>": "#rrggbb"}`. It has no generated editor.
+- An `Effect` may override `coverage(ctx, params)` (bool per LED, or `None` for all). The compositor multiplies the layer's weight by it, so unpainted keys are transparent and the layers below show through. Mask and opacity still apply on top.
+- `model/paint.py` (`PaintDocument`, no Qt) holds the painted map and the undo/redo history; edits with the same merge key (dragging in the color picker) are one undo step. `ui/paint_panel.py` drives it and writes each change to the layer through the bridge.
+- The canvas owns key selection (click, Shift-add, Ctrl-toggle, drag box, row via the Row tool or Alt-click, Ctrl+A, Esc) and the eyedropper; a multi-LED keycap is always selected whole.
+- Persistence: `model/store.py` writes `profiles.json` in the format below with a single "Default" profile (layer stacks, brightness and on/off per group, plus master brightness). `EngineHost` loads it at construction and saves debounced (about 0.5 s) off the caller's thread, and flushes on stop. Other profiles and rules in the file are preserved. M6 builds profile CRUD on this file. `--backend fake` does not read or write it.
 
 ## Data formats (JSON, versioned with `"version": 1`)
 `profiles.json`:

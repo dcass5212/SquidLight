@@ -1,0 +1,194 @@
+OpenRGB device dump  (2026-11-03T17:31:39)
+server: 127.0.0.1:6742
+SDK protocol version: 4
+devices found: 4
+========================================================================
+[0] Corsair Vengeance RGB DDR5
+    type:        DRAM
+    vendor:      'Corsair'
+    description: 'Corsair DRAM RGB Device'
+    version:     '0.5.6'
+    serial:      ''
+    location:    'I2C: PawnIO SMBus PIIX4 0, address 0x19'
+    active mode: Direct
+    modes (11): Direct, Custom, Color Shift, Color Pulse, Rainbow Wave, Color Wave, Visor, Rain, Marquee, Rainbow, Sequential
+    zones (1):
+      zone 0: 'Corsair DRAM' type=LINEAR leds=10 min=? max=?
+    leds (10):
+         0: Corsair DRAM LED 0
+         1: Corsair DRAM LED 1
+         2: Corsair DRAM LED 2
+         3: Corsair DRAM LED 3
+         4: Corsair DRAM LED 4
+         5: Corsair DRAM LED 5
+         6: Corsair DRAM LED 6
+         7: Corsair DRAM LED 7
+         8: Corsair DRAM LED 8
+         9: Corsair DRAM LED 9
+========================================================================
+[1] Corsair Vengeance RGB DDR5
+    type:        DRAM
+    vendor:      'Corsair'
+    description: 'Corsair DRAM RGB Device'
+    version:     '0.5.6'
+    serial:      ''
+    location:    'I2C: PawnIO SMBus PIIX4 0, address 0x1B'
+    active mode: Direct
+    modes (11): Direct, Custom, Color Shift, Color Pulse, Rainbow Wave, Color Wave, Visor, Rain, Marquee, Rainbow, Sequential
+    zones (1):
+      zone 0: 'Corsair DRAM' type=LINEAR leds=10 min=? max=?
+    leds (10):
+         0: Corsair DRAM LED 0
+         1: Corsair DRAM LED 1
+         2: Corsair DRAM LED 2
+         3: Corsair DRAM LED 3
+         4: Corsair DRAM LED 4
+         5: Corsair DRAM LED 5
+         6: Corsair DRAM LED 6
+         7: Corsair DRAM LED 7
+         8: Corsair DRAM LED 8
+         9: Corsair DRAM LED 9
+========================================================================
+[2] ASUS B650EM MAX GAMING WIFI
+    type:        MOTHERBOARD
+    vendor:      'ASUS'
+    description: 'ASUS Aura USB Mainboard Device'
+    version:     'AULA3-AR32-0309'
+    serial:      '9876543210'
+    location:    'HID: \\\\?\\HID#VID_0B05&PID_19AF&MI_02#a&d29d7f0&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}'
+    active mode: Direct
+    modes (9): Direct, Off, Static, Breathing, Flashing, Spectrum Cycle, Rainbow, Chase Fade, Chase
+    zones (3):
+      zone 0: 'Addressable RGB Header 1' type=LINEAR leds=0 min=? max=?
+      zone 1: 'Addressable RGB Header 2' type=LINEAR leds=0 min=? max=?
+      zone 2: 'Addressable RGB Header 3' type=LINEAR leds=0 min=? max=?
+    leds (0):
+========================================================================
+[3] Corsair K70 RGB PRO
+    type:        KEYBOARD
+    vendor:      'Corsair'
+    description: 'Corsair Peripheral V2 HW Device'
+    version:     ''
+    serial:      'FCCA22765352985BADC7FD1460B1C691'
+    location:    'HID: \\\\?\\HID#VID_1B1C&PID_1BC4&MI_01#8&5474b0c&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}'
+    active mode: Direct
+    modes (2): Direct, Static
+    zones (1):
+      zone 0: 'Keyboard' type=MATRIX leds=115 min=? max=?  matrix=7x21
+    leds (115):
+         0: Profile
+         1: Light
+         2: Lock
+         3: Logo
+         4: Key: Media Mute
+         5: Key: Escape
+         6: Key: F1
+         7: Key: F2
+         8: Key: F3
+         9: Key: F4
+        10: Key: F5
+        11: Key: F6
+        12: Key: F7
+        13: Key: F8
+        14: Key: F9
+        15: Key: F10
+        16: Key: F11
+        17: Key: F12
+        18: Key: Print Screen
+        19: Key: Scroll Lock
+        20: Key: Pause/Break
+        21: Key: Media Stop
+        22: Key: Media Previous
+        23: Key: Media Play/Pause
+        24: Key: Media Next
+        25: Key: `
+        26: Key: 1
+        27: Key: 2
+        28: Key: 3
+        29: Key: 4
+        30: Key: 5
+        31: Key: 6
+        32: Key: 7
+        33: Key: 8
+        34: Key: 9
+        35: Key: 0
+        36: Key: -
+        37: Key: =
+        38: Key: Backspace
+        39: Key: Insert
+        40: Key: Home
+        41: Key: Page Up
+        42: Key: Num Lock
+        43: Key: Number Pad /
+        44: Key: Number Pad *
+        45: Key: Number Pad -
+        46: Key: Tab
+        47: Key: Q
+        48: Key: W
+        49: Key: E
+        50: Key: R
+        51: Key: T
+        52: Key: Y
+        53: Key: U
+        54: Key: I
+        55: Key: O
+        56: Key: P
+        57: Key: [
+        58: Key: ]
+        59: Key: \ (ANSI)
+        60: Key: Delete
+        61: Key: End
+        62: Key: Page Down
+        63: Key: Number Pad 7
+        64: Key: Number Pad 8
+        65: Key: Number Pad 9
+        66: Key: Number Pad +
+        67: Key: Caps Lock
+        68: Key: A
+        69: Key: S
+        70: Key: D
+        71: Key: F
+        72: Key: G
+        73: Key: H
+        74: Key: J
+        75: Key: K
+        76: Key: L
+        77: Key: ;
+        78: Key: '
+        79: Key: Enter
+        80: Key: Number Pad 4
+        81: Key: Number Pad 5
+        82: Key: Number Pad 6
+        83: Key: Left Shift
+        84: Key: Z
+        85: Key: X
+        86: Key: C
+        87: Key: V
+        88: Key: B
+        89: Key: N
+        90: Key: M
+        91: Key: ,
+        92: Key: .
+        93: Key: /
+        94: Key: Right Shift
+        95: Key: Up Arrow
+        96: Key: Number Pad 1
+        97: Key: Number Pad 2
+        98: Key: Number Pad 3
+        99: Key: Number Pad Enter
+       100: Key: Left Control
+       101: Key: Left Windows
+       102: Key: Left Alt
+       103: Key: Space
+       104: Key: Space
+       105: Key: Space
+       106: Key: Right Alt
+       107: Key: Right Fn
+       108: Key: Menu
+       109: Key: Right Control
+       110: Key: Left Arrow
+       111: Key: Down Arrow
+       112: Key: Right Arrow
+       113: Key: Number Pad 0
+       114: Key: Number Pad .
+========================================================================

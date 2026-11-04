@@ -3,7 +3,7 @@
 ## Machine
 - Windows 11 Home
 - Motherboard: ASUS B650EM MAX GAMING WIFI (AM5, DDR5). The case lights and fans are integrated.
-- Keyboard: Corsair K70 Pro
+- Keyboard: Corsair K70 RGB PRO (USB VID 1B1C, PID 1BC4)
 - RAM: Corsair Vengeance RGB (DDR5)
 
 ## OpenRGB: bundled, not user-installed
@@ -40,3 +40,14 @@ The final app ships its own copy of OpenRGB (see `01-product-and-decisions.md`).
 - If another OpenRGB (the user's own) already holds port 6742, connect to it instead of starting ours, and show a note in Settings.
 - Verify the exact CLI flags (`--server`, `--startminimized`, `--server-port`, config-dir option) against the bundled version's `--help` before relying on them; flags have changed between releases.
 - Both the SDK server and the bundled OpenRGB must bind to `127.0.0.1` only.
+
+## M0 findings (verified on the real machine, SDK protocol 4)
+Full dump: `docs/device-dump.txt`. It was captured with an earlier OpenRGB build that turned out to be wrong for this keyboard (see below); re-run `tools/probe.py` against 1.0.0 and compare, since LED order or names may differ.
+
+**OpenRGB version: use 1.0.0** (recorded in `vendor/OPENRGB_VERSION`, unzipped so that `vendor/openrgb/OpenRGB.exe` is at the top level). The previous build mis-drove the K70 RGB PRO: a whole-board Static color came out non-uniform with over half the keys dark, even in OpenRGB's own GUI, so the fault was in OpenRGB and not in our app. Switching builds fixed it. If keyboard lighting looks scrambled or partly dark, check the OpenRGB build first, then iCUE, Armoury Crate and Windows Dynamic Lighting running in the background.
+- **RAM**: 2 sticks of Corsair Vengeance RGB DDR5, each 1 linear zone of 10 LEDs (SMBus via PawnIO). Direct mode works.
+- **Board**: ASUS Aura USB mainboard with 3 "Addressable RGB Header" zones, all reporting 0 LEDs (no auto-detect), and no onboard LEDs exposed. The 12V RGB header that SignalRGB shows is not exposed by OpenRGB.
+- **Keyboard**: Corsair K70 RGB PRO, 115 LEDs, matrix 7x21, modes Direct and Static only. Works without iCUE. LED names are not unique ("Key: Space" appears 3 times), so map by index plus name. Non-key LEDs: Profile, Light, Lock, Logo, media keys.
+- **Case lights and fans**: all 7 fans and both strips are daisy-chained on **Addressable RGB Header 1**. Headers 2 and 3 were not observed to drive anything. The total chain length is unknown, so the user must set the LED count for Header 1 in M5 (SignalRGB's "60 per header" is only a placeholder default).
+- FakeBackend should mirror this: 115-LED keyboard, 2 RAM sticks of 10 LEDs, board with 3 zones (use a non-zero test length on zone 1).
+- `tools/header_test.py` lights each ARGB header in turn to re-check this.
