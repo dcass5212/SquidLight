@@ -81,8 +81,8 @@ class PaintPanel(QFrame):
         self.setFixedWidth(self.PANEL_WIDTH)
 
         col = QVBoxLayout(self)
-        col.setContentsMargins(T.unit * 2, T.unit * 2, T.unit * 2, T.unit * 2)
-        col.setSpacing(T.unit * 1.5)
+        col.setContentsMargins(T.unit * 2, T.unit * 3, T.unit * 2, T.unit * 2)
+        col.setSpacing(T.unit)
 
         title = QLabel("Paint")
         title.setObjectName("PanelTitle")
@@ -91,11 +91,16 @@ class PaintPanel(QFrame):
         self.hint.setObjectName("Caption")
         self.hint.setWordWrap(True)
         col.addWidget(self.hint)
+        col.addSpacing(T.unit * 2)
 
         # -- selection
         col.addWidget(self._label("Select keys"))
-        tools = QHBoxLayout()
-        tools.setSpacing(6)
+        tools_frame = QFrame()
+        tools_frame.setObjectName("Segmented")
+        tools_frame.setAttribute(Qt.WA_StyledBackground)
+        tools = QHBoxLayout(tools_frame)
+        tools.setContentsMargins(3, 3, 3, 3)
+        tools.setSpacing(2)
         self.tool_group = QButtonGroup(self)
         self.tool_buttons: dict[str, QPushButton] = {}
         for tool, text, tip in (
@@ -104,29 +109,31 @@ class PaintPanel(QFrame):
             ("eyedropper", "Eyedropper", "Click a key to copy the color it shows"),
         ):
             b = QPushButton(text)
-            b.setObjectName("PanelButton")
             b.setCheckable(True)
             b.setToolTip(tip)
             b.setCursor(Qt.PointingHandCursor)
             self.tool_group.addButton(b)
-            tools.addWidget(b)
+            tools.addWidget(b, 1)
             self.tool_buttons[tool] = b
             b.clicked.connect(lambda _c=False, t=tool: self.set_tool(t))
-        col.addLayout(tools)
+        col.addWidget(tools_frame)
         sel_row = QHBoxLayout()
-        sel_row.setSpacing(6)
+        sel_row.setSpacing(4)
+        self.count = QLabel()
+        self.count.setObjectName("Caption")
+        sel_row.addWidget(self.count, 1)
         self.select_all_button = QPushButton("Select all")
         self.select_none_button = QPushButton("Select none")
         for b in (self.select_all_button, self.select_none_button):
-            b.setObjectName("PanelButton")
+            b.setObjectName("GhostButton")
             b.setCursor(Qt.PointingHandCursor)
             sel_row.addWidget(b)
+        self.select_all_button.setToolTip("Select every key (Ctrl+A on the keyboard)")
+        self.select_none_button.setToolTip("Clear the selection (Esc on the keyboard)")
         self.select_all_button.clicked.connect(canvas.select_all)
         self.select_none_button.clicked.connect(lambda: canvas.set_selection(()))
         col.addLayout(sel_row)
-        self.count = QLabel()
-        self.count.setObjectName("Caption")
-        col.addWidget(self.count)
+        col.addSpacing(T.unit * 2)
 
         # -- color
         col.addWidget(self._label("Color"))
@@ -145,29 +152,30 @@ class PaintPanel(QFrame):
         self.recent_row.setSpacing(6)
         self.recent_row.addStretch(1)
         col.addLayout(self.recent_row)
+        col.addSpacing(T.unit * 2)
 
         # -- fill / clear
         actions = QHBoxLayout()
-        actions.setSpacing(6)
+        actions.setSpacing(T.unit)
         self.fill_button = QPushButton()
         self.fill_button.setObjectName("AccentButton")
         self.clear_button = QPushButton()
-        self.clear_button.setObjectName("PanelButton")
         for b in (self.fill_button, self.clear_button):
             b.setCursor(Qt.PointingHandCursor)
-            actions.addWidget(b)
+            actions.addWidget(b, 1)
         self.fill_button.clicked.connect(self.fill)
         self.clear_button.clicked.connect(self.clear)
         col.addLayout(actions)
 
         history = QHBoxLayout()
-        history.setSpacing(6)
+        history.setSpacing(4)
+        history.addStretch(1)
         self.undo_button = QPushButton("Undo")
         self.redo_button = QPushButton("Redo")
         self.undo_button.setToolTip("Undo (Ctrl+Z)")
         self.redo_button.setToolTip("Redo (Ctrl+Y)")
         for b in (self.undo_button, self.redo_button):
-            b.setObjectName("PanelButton")
+            b.setObjectName("GhostButton")
             b.setCursor(Qt.PointingHandCursor)
             history.addWidget(b)
         self.undo_button.clicked.connect(self.undo)

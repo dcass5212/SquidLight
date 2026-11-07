@@ -21,6 +21,7 @@ from .widgets import keyboard_focused, track_focus_reason
 
 PREVIEW_COLS, PREVIEW_ROWS = 16, 5
 PREVIEW_INTERVAL_MS = 40
+COLUMNS = 5  # three rows: the dialog fits a 1080p screen at 125% scaling
 _DESCRIPTIONS = {
     "static": "One solid color.",
     "breathing": "A color that fades in and out.",
@@ -28,12 +29,14 @@ _DESCRIPTIONS = {
     "rainbow_wave": "A rainbow sweeping across the device.",
     "gradient_wave": "Your own colors sweeping across the device.",
     "starlight": "Random keys twinkle and fade.",
-    "reactive_typing": "Keys flash when you press them, then fade. Reacts to typing in any app.",
+    "fire": "Flames lick up from the bottom row.",
+    "raindrop": "Drops streak down and splash at the bottom.",
+    "reactive_typing": "Keys flash when you press them, in any app, then fade.",
     "ripple": "A ring spreads out from each key you press.",
     "audio_spectrum": "Equalizer bars that follow whatever your PC is playing.",
     "audio_pulse": "The whole device throbs with the bass of your audio.",
     "cpu_gpu_meter": "A bar that fills with CPU, RAM or GPU load.",
-    "temperature_gradient": "A color that shifts from cool to hot with a temperature. Needs LibreHardwareMonitor.",
+    "temperature_gradient": "Shifts from cool to hot with a temperature. Needs LibreHardwareMonitor.",
 }
 
 
@@ -59,7 +62,7 @@ class EffectCard(QAbstractButton):
         self._colors = np.zeros((PREVIEW_COLS * PREVIEW_ROWS, 3), dtype=np.uint8)
 
     def sizeHint(self) -> QSize:
-        return QSize(196, 132)
+        return QSize(200, 176)
 
     def focusInEvent(self, e) -> None:
         track_focus_reason(self, e)
@@ -78,10 +81,10 @@ class EffectCard(QAbstractButton):
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         hover = self.underMouse()
         p.setPen(QPen(qcolor(T.accent if keyboard_focused(self) else T.track if hover else T.border), 1.5 if keyboard_focused(self) else 1))
-        p.setBrush(qcolor(T.hover if hover else T.raised))
-        p.drawRoundedRect(r, T.radius + 2, T.radius + 2)
+        p.setBrush(qcolor(T.raised if hover else T.panel))
+        p.drawRoundedRect(r, T.radius + 4, T.radius + 4)
 
-        well = QRectF(r.left() + 10, r.top() + 10, r.width() - 20, r.height() - 48)
+        well = QRectF(r.left() + 10, r.top() + 10, r.width() - 20, 76)
         p.setPen(Qt.NoPen)
         p.setBrush(qcolor(T.well))
         p.drawRoundedRect(well, T.radius, T.radius)
@@ -94,11 +97,17 @@ class EffectCard(QAbstractButton):
             p.setBrush(QColor(cr, cg, cb) if max(cr, cg, cb) >= 24 else qcolor(T.led_off))
             p.drawRoundedRect(QRectF(ox + col * pitch, oy + row * pitch, size, size), 2, 2)
 
+        text = QRectF(r.left() + 12, well.bottom() + 10, r.width() - 24, r.bottom() - well.bottom() - 18)
         p.setPen(qcolor(T.text))
         font = self.font()
         font.setWeight(font.Weight.DemiBold)
         p.setFont(font)
-        p.drawText(QRectF(r.left() + 12, r.bottom() - 34, r.width() - 24, 28), Qt.AlignVCenter | Qt.AlignLeft, self.text())
+        p.drawText(text, Qt.AlignTop | Qt.AlignLeft, self.text())
+        small = self.font()
+        small.setPixelSize(T.caption)
+        p.setFont(small)
+        p.setPen(qcolor(T.muted))
+        p.drawText(text.adjusted(0, 22, 0, 0), Qt.AlignTop | Qt.AlignLeft | Qt.TextWordWrap, self.description)
 
 
 class EffectLibrary(QDialog):
@@ -111,20 +120,21 @@ class EffectLibrary(QDialog):
         self.chosen: Optional[str] = None
         col = QVBoxLayout(self)
         col.setContentsMargins(T.unit * 3, T.unit * 3, T.unit * 3, T.unit * 3)
-        col.setSpacing(T.unit * 2)
+        col.setSpacing(T.unit / 2)
         heading = QLabel("Effect library")
         heading.setObjectName("EmptyTitle")
-        hint = QLabel("New layers go on top of the stack. Hover a card for a description.")
-        hint.setObjectName("Caption")
+        hint = QLabel("Pick an effect to add it as a new layer on top of the stack.")
+        hint.setObjectName("Muted")
         col.addWidget(heading)
         col.addWidget(hint)
+        col.addSpacing(T.unit * 2)
         grid = QGridLayout()
         grid.setSpacing(T.unit * 1.5)
         self.cards: dict[str, EffectCard] = {}
         for i, cls in enumerate(listed_effects()):
             card = EffectCard(cls)
             card.clicked.connect(lambda _=False, eid=cls.id: self._choose(eid))
-            grid.addWidget(card, i // 3, i % 3)
+            grid.addWidget(card, i // COLUMNS, i % COLUMNS)
             self.cards[cls.id] = card
         col.addLayout(grid)
 

@@ -6,8 +6,8 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QPainter, QPen
-from PySide6.QtWidgets import QAbstractButton, QButtonGroup, QLabel, QVBoxLayout, QWidget
+from PySide6.QtGui import QPainter, QPen, QRadialGradient
+from PySide6.QtWidgets import QAbstractButton, QButtonGroup, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from .theme import T, health_color, health_text, qcolor
 from .widgets import group_label, keyboard_focused, track_focus_reason
@@ -34,7 +34,7 @@ class SidebarButton(QAbstractButton):
         self.setAccessibleName(text)
 
     def sizeHint(self) -> QSize:
-        return QSize(192, 38)
+        return QSize(192, 36)
 
     def focusInEvent(self, e) -> None:
         track_focus_reason(self, e)
@@ -55,7 +55,7 @@ class SidebarButton(QAbstractButton):
             p.drawRoundedRect(r, T.radius, T.radius)
         if self.isChecked():
             p.setBrush(qcolor(T.accent))
-            p.drawRoundedRect(QRectF(r.left(), r.top() + 9, 3, r.height() - 18), 1.5, 1.5)
+            p.drawRoundedRect(QRectF(r.left(), r.top() + 10, 3, r.height() - 20), 1.5, 1.5)
         if keyboard_focused(self):
             p.setBrush(Qt.NoBrush)
             p.setPen(QPen(qcolor(T.accent), 1.5))
@@ -70,7 +70,28 @@ class SidebarButton(QAbstractButton):
         if self.dot_color:
             p.setPen(Qt.NoPen)
             p.setBrush(qcolor(self.dot_color))
-            p.drawEllipse(QRectF(r.right() - T.unit * 2 - 4, r.center().y() - 4, 8, 8))
+            p.drawEllipse(QRectF(r.right() - T.unit * 2 - 3, r.center().y() - 3, 6, 6))
+
+
+class _Mark(QWidget):
+    """The wordmark's glyph: a small point of light in the accent color."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(22, 22)
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        c = QRectF(self.rect()).center()
+        glow = QRadialGradient(c, 11)
+        glow.setColorAt(0.0, qcolor(T.accent, 150))
+        glow.setColorAt(1.0, qcolor(T.accent, 0))
+        p.setPen(Qt.NoPen)
+        p.setBrush(glow)
+        p.drawEllipse(c, 11, 11)
+        p.setBrush(qcolor(T.accent))
+        p.drawEllipse(c, 4, 4)
 
 
 class Sidebar(QWidget):
@@ -87,14 +108,22 @@ class Sidebar(QWidget):
         self._device_buttons: list[SidebarButton] = []
 
         col = QVBoxLayout(self)
-        col.setContentsMargins(0, T.unit * 2, 0, T.unit * 2)
+        col.setContentsMargins(0, 0, 0, T.unit * 2)
         col.setSpacing(2)
 
+        # same height as the page header, so the two hairlines meet in one line
+        brand = QFrame()
+        brand.setObjectName("Brand")
+        brand.setFixedHeight(T.unit * 10)
+        brow = QHBoxLayout(brand)
+        brow.setContentsMargins(T.unit * 2, 0, T.unit * 2, 0)
+        brow.setSpacing(T.unit)
+        brow.addWidget(_Mark())
         wordmark = QLabel("SquidLight")
         wordmark.setObjectName("Wordmark")
-        wordmark.setContentsMargins(T.unit, 0, 0, 0)
-        col.addWidget(wordmark)
-        col.addSpacing(T.unit * 3)
+        brow.addWidget(wordmark, 1)
+        col.addWidget(brand)
+        col.addSpacing(T.unit * 2)
 
         col.addWidget(self._add(SidebarButton("Dashboard", DASHBOARD)))
         col.addSpacing(T.unit * 2)

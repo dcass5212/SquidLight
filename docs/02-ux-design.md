@@ -22,10 +22,12 @@ Model it on Razer Synapse: device-first navigation, one big visual, simple panel
 - The right panel changes with context: layer stack plus properties for the selected layer.
 
 ## Theme
-- Background `#121212`, panels `#1b1b1b`, raised `#242424`, border `#2e2e2e`
-- Text `#e8e8e8`, muted `#9a9a9a`
-- Single accent color (default green `#44d62c`, user-changeable)
-- 8px grid, 6px corner radius, system font (Segoe UI Variable)
+- "Light in deep water": cool ink chrome that stays quiet, so the only saturated colors are the accent and the LEDs
+- Background `#0e0f11`, panels `#15171a`, raised `#1d2024`, hairlines `#262a2f`
+- Text `#e8eaed`, muted `#8f949b` (5:1 or better on every surface)
+- Single accent color (default green `#44d62c`, user-changeable); "selected" is always the same 3px accent bar
+- Device previews float on the page with no frame; their glow lights the surface around them
+- 8px grid, 6px corner radius, 32px controls, system font (Segoe UI Variable: Display for titles, Text for body); sentence case, no all-caps labels
 - Define colors as tokens in one `theme.py`; build the QSS from it
 
 ## Screens

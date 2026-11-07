@@ -23,12 +23,16 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 from ..engine.rules import Rule, running_apps
 from .theme import T
+
+PAGE_MAX_WIDTH = 860
+LIST_ROW_PX = 38  # one profile row, for sizing the list to its content
 
 
 def confirm_switch(bridge, parent=None) -> bool:
@@ -114,9 +118,9 @@ class RuleRow(QFrame):
 
     def __init__(self, rule: Rule, profiles, parent=None) -> None:
         super().__init__(parent)
-        self.setObjectName("LayerRow")
+        self.setObjectName("RuleRow")
         row = QHBoxLayout(self)
-        row.setContentsMargins(T.unit, T.unit / 2, T.unit, T.unit / 2)
+        row.setContentsMargins(0, T.unit, 0, T.unit)
         row.setSpacing(T.unit)
         self.match = QLineEdit(rule.match)
         self.match.setAccessibleName("Program")
@@ -170,81 +174,117 @@ class ProfilesPage(QWidget):
     def __init__(self, bridge, parent=None) -> None:
         super().__init__(parent)
         self.bridge = bridge
-        col = QVBoxLayout(self)
-        col.setContentsMargins(T.unit * 3, T.unit * 3, T.unit * 3, T.unit * 3)
-        col.setSpacing(T.unit * 2)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        outer.addWidget(scroll)
+        holder = QWidget()
+        scroll.setWidget(holder)
+        hrow = QHBoxLayout(holder)
+        hrow.setContentsMargins(T.unit * 4, T.unit * 3, T.unit * 3, T.unit * 5)
+        page = QWidget()
+        page.setMaximumWidth(PAGE_MAX_WIDTH)
+        hrow.addWidget(page, 1)
+        hrow.addStretch(0)  # left-aligned like Settings once the window is wider than the page
+        col = QVBoxLayout(page)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(T.unit)
 
         # -- profiles
-        box = QFrame()
-        box.setObjectName("Card")
-        pcol = QVBoxLayout(box)
-        pcol.setContentsMargins(T.unit * 2, T.unit * 2, T.unit * 2, T.unit * 2)
-        title = QLabel("Profiles")
-        title.setObjectName("CardTitle")
-        pcol.addWidget(title)
+        title = QLabel("Your profiles")
+        title.setObjectName("SectionTitle")
+        col.addWidget(title)
         self.hint = QLabel("")
         self.hint.setObjectName("Muted")
         self.hint.setWordWrap(True)
-        pcol.addWidget(self.hint)
+        col.addWidget(self.hint)
+        col.addSpacing(T.unit)
 
-        body = QHBoxLayout()
-        body.setSpacing(T.unit * 2)
+        box = QFrame()
+        box.setObjectName("Group")
+        pcol = QVBoxLayout(box)
+        pcol.setContentsMargins(T.unit * 2, T.unit * 2, T.unit * 2, T.unit * 2)
+        pcol.setSpacing(T.unit * 1.5)
+
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(T.unit)
+        self.btn = {}
+        for key, text, slot, tip in (
+            ("activate", "Use this profile", self._activate, "Switch your lighting to the selected profile"),
+            ("new", "New from current", self._new, "Save what's lit now as a new profile"),
+            ("duplicate", "Duplicate", self._duplicate, "Copy the selected profile"),
+            ("rename", "Rename…", self._rename, "Rename the selected profile"),
+            ("default", "Make default", self._make_default, "Use the selected profile whenever no rule matches"),
+            ("import", "Import…", self._import, "Add a profile from a .json file"),
+            ("export", "Export…", self._export, "Save the selected profile to a .json file"),
+            ("delete", "Delete", self._delete, "Delete the selected profile"),
+        ):
+            b = QPushButton(text)
+            b.setToolTip(tip)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(slot)
+            self.btn[key] = b
+        self.btn["activate"].setObjectName("AccentButton")
+        for key in ("import", "export"):
+            self.btn[key].setObjectName("GhostButton")
+        self.btn["delete"].setObjectName("DangerButton")
+        for key in ("activate", "new", "duplicate", "rename", "default"):
+            toolbar.addWidget(self.btn[key])
+        toolbar.addStretch(1)
+        pcol.addLayout(toolbar)
+
         self.list = QListWidget()
         self.list.setAccessibleName("Profiles")
-        self.list.setMinimumHeight(150)
         self.list.setSelectionMode(QAbstractItemView.SingleSelection)
         self.list.itemDoubleClicked.connect(lambda _: self._activate())
         self.list.currentItemChanged.connect(lambda *_: self._update_buttons())
-        body.addWidget(self.list, 1)
-
-        buttons = QVBoxLayout()
-        buttons.setSpacing(T.unit)
-        self.btn = {}
-        for key, text, slot in (
-            ("activate", "Use this profile", self._activate),
-            ("new", "New from current", self._new),
-            ("duplicate", "Duplicate", self._duplicate),
-            ("rename", "Rename…", self._rename),
-            ("default", "Make default", self._make_default),
-            ("delete", "Delete", self._delete),
-            ("import", "Import…", self._import),
-            ("export", "Export…", self._export),
-        ):
-            b = QPushButton(text)
-            b.clicked.connect(slot)
-            buttons.addWidget(b)
-            self.btn[key] = b
-        buttons.addStretch(1)
-        body.addLayout(buttons)
-        pcol.addLayout(body)
+        pcol.addWidget(self.list)
+        footer = QHBoxLayout()
+        footer.setSpacing(4)
+        tip = QLabel("Double-click a profile to switch to it.")
+        tip.setObjectName("Caption")
+        footer.addWidget(tip, 1)
+        for key in ("import", "export", "delete"):
+            footer.addWidget(self.btn[key])
+        pcol.addLayout(footer)
         col.addWidget(box)
+        col.addSpacing(T.unit * 4)
 
         # -- rules
-        rbox = QFrame()
-        rbox.setObjectName("Card")
-        rcol = QVBoxLayout(rbox)
-        rcol.setContentsMargins(T.unit * 2, T.unit * 2, T.unit * 2, T.unit * 2)
         rtitle = QLabel("Auto-switch rules")
-        rtitle.setObjectName("CardTitle")
+        rtitle.setObjectName("SectionTitle")
         rhelp = QLabel(
             "When a program is running, SquidLight switches to its profile, and goes back to the "
             "default profile when it closes. The first matching rule wins."
         )
         rhelp.setObjectName("Muted")
         rhelp.setWordWrap(True)
-        rcol.addWidget(rtitle)
-        rcol.addWidget(rhelp)
+        col.addWidget(rtitle)
+        col.addWidget(rhelp)
+        col.addSpacing(T.unit)
+        rbox = QFrame()
+        rbox.setObjectName("Group")
+        rcol = QVBoxLayout(rbox)
+        rcol.setContentsMargins(T.unit * 2, T.unit, T.unit * 2, T.unit * 2)
+        rcol.setSpacing(T.unit)
         self.rows_layout = QVBoxLayout()
-        self.rows_layout.setSpacing(T.unit / 2)
+        self.rows_layout.setSpacing(0)
         rcol.addLayout(self.rows_layout)
-        self.no_rules = QLabel("No rules yet.")
+        self.no_rules = QLabel("No rules yet. Add one to switch profiles when a game or app starts.")
         self.no_rules.setObjectName("Muted")
+        self.no_rules.setWordWrap(True)
+        self.no_rules.setContentsMargins(0, T.unit, 0, 0)
         rcol.addWidget(self.no_rules)
         add = QHBoxLayout()
         self.add_rule_btn = QPushButton("+ Add rule")
+        self.add_rule_btn.setCursor(Qt.PointingHandCursor)
         self.add_rule_btn.clicked.connect(self._add_rule)
         add.addWidget(self.add_rule_btn)
         add.addStretch(1)
+        rcol.addSpacing(T.unit / 2)
         rcol.addLayout(add)
         col.addWidget(rbox)
         col.addStretch(1)
@@ -272,7 +312,7 @@ class ProfilesPage(QWidget):
                 tags.append("active, unsaved changes" if self.bridge.dirty else "active")
             if p.is_default:
                 tags.append("default")
-            item = QListWidgetItem(p.name + (f"   ({', '.join(tags)})" if tags else ""))
+            item = QListWidgetItem(p.name + (f"    ({', '.join(tags)})" if tags else ""))
             item.setData(Qt.UserRole, p.id)
             if p.id == mgr.active_id:
                 f = item.font()
@@ -282,6 +322,9 @@ class ProfilesPage(QWidget):
             if p.id == keep:
                 self.list.setCurrentItem(item)
         self.list.blockSignals(False)
+        # as tall as its rows (between 3 and 7 of them), not a big empty box
+        row_h = self.list.sizeHintForRow(0) if self.list.count() else LIST_ROW_PX
+        self.list.setFixedHeight(min(max(self.list.count(), 2), 7) * max(row_h, 1) + 10)
         self.hint.setText(
             "Everything you change is live. Save keeps it in the active profile; switching "
             "profiles discards unsaved changes."

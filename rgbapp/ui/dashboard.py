@@ -31,17 +31,17 @@ class DeviceCard(QFrame):
         self.key = group.key
 
         col = QVBoxLayout(self)
-        col.setContentsMargins(T.unit * 2, T.unit * 2, T.unit * 2, T.unit * 2)
+        col.setContentsMargins(T.unit * 2.5, T.unit * 2, T.unit * 2.5, T.unit * 2)
         col.setSpacing(T.unit * 1.5)
 
         # title, model and on/off
         head = QHBoxLayout()
         head.setSpacing(T.unit)
         names = QVBoxLayout()
-        names.setSpacing(0)
+        names.setSpacing(2)
         self.title = QLabel(group_label(group))
         self.title.setObjectName("CardTitle")
-        model = QLabel(group.name)
+        model = QLabel(f"{group.name}, {group.led_count} LEDs")
         model.setObjectName("CardModel")
         names.addWidget(self.title)
         names.addWidget(model)
@@ -52,29 +52,37 @@ class DeviceCard(QFrame):
         head.addWidget(self.toggle, 0, Qt.AlignTop)
         col.addLayout(head)
 
-        # live preview
+        # live preview, floating on the card
         self.preview = make_preview(group, clickable=True)
-        self.preview.setMinimumHeight(132)
+        self.preview.setMinimumHeight(140)
         self.preview.setToolTip(f"Open {group_label(group)}")
         self.preview.activated.connect(lambda: self.open_requested.emit(self.key))
         col.addWidget(self.preview, 1)
 
-        # status
+        self.controls = DeviceControls(bridge, self.key)
+        col.addWidget(self.controls)
+
+        rule = QFrame()
+        rule.setObjectName("Rule")
+        rule.setFixedHeight(1)
+        col.addWidget(rule)
+
+        # status, and the way into the device page
         status = QHBoxLayout()
-        status.setSpacing(6)
+        status.setSpacing(T.unit)
         self.dot = StatusDot()
         self.status = QLabel("")
         self.status.setObjectName("Caption")
-        leds = QLabel(f"{group.led_count} LEDs")
-        leds.setObjectName("Caption")
         status.addWidget(self.dot)
         status.addWidget(self.status)
         status.addStretch(1)
-        status.addWidget(leds)
+        self.open_btn = QPushButton("Edit layers")
+        self.open_btn.setObjectName("GhostButton")
+        self.open_btn.setCursor(Qt.PointingHandCursor)
+        self.open_btn.setToolTip(f"Open {group_label(group)} to stack effects, paint keys or set zones")
+        self.open_btn.clicked.connect(lambda: self.open_requested.emit(self.key))
+        status.addWidget(self.open_btn)
         col.addLayout(status)
-
-        self.controls = DeviceControls(bridge, self.key)
-        col.addWidget(self.controls)
 
         self.toggle.toggled.connect(lambda on: bridge.set_enabled(self.key, on))
         bridge.settings_changed.connect(self._sync_toggle)
@@ -160,17 +168,24 @@ class DashboardPage(QWidget):
         self._columns = 0
 
         col = QVBoxLayout(self)
-        col.setContentsMargins(T.unit * 3, T.unit * 3, T.unit * 3, 0)
+        col.setContentsMargins(T.unit * 4, T.unit * 3, T.unit * 4, 0)
         col.setSpacing(T.unit * 2)
 
         master = QFrame()
         master.setObjectName("MasterBar")
         row = QHBoxLayout(master)
-        row.setContentsMargins(T.unit * 2, T.unit * 1.5, T.unit * 2, T.unit * 1.5)
+        row.setContentsMargins(T.unit * 2.5, T.unit * 1.5, T.unit * 2.5, T.unit * 1.5)
         row.setSpacing(T.unit * 2)
+        names = QVBoxLayout()
+        names.setSpacing(0)
         label = QLabel("Master brightness")
         label.setObjectName("MasterLabel")
-        row.addWidget(label)
+        hint = QLabel("Scales every device at once")
+        hint.setObjectName("Caption")
+        names.addWidget(label)
+        names.addWidget(hint)
+        row.addLayout(names)
+        row.addSpacing(T.unit * 2)
         self.master = PercentSlider("Master brightness")
         self.master.set_value(bridge.host.master_brightness)
         self.master.value_changed.connect(bridge.set_master_brightness)

@@ -49,13 +49,19 @@ class NumberEditor(_Editor):
         self.label.setObjectName("ValueLabel")
         self.label.setMinimumWidth(44)
         self.label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(T.unit)
-        row.addWidget(self.slider, 1)
-        row.addWidget(self.label)
+        self._row = QHBoxLayout(self)
+        self._row.setContentsMargins(0, 0, 0, 0)
+        self._row.setSpacing(T.unit)
+        self._row.addWidget(self.slider, 1)
+        self._row.addWidget(self.label)
         self.slider.valueChanged.connect(self._changed)
         self.set_value(param.default)
+
+    def take_readout(self) -> QLabel:
+        """Hand the value label to the caller to place (beside the field's name); the
+        slider then gets the full width. The label keeps updating either way."""
+        self._row.removeWidget(self.label)
+        return self.label
 
     def _to_value(self, pos: int):
         if self.is_int:
@@ -344,7 +350,9 @@ class GradientEditor(_Editor):
         pos_row = QHBoxLayout()
         pos_row.setContentsMargins(0, 0, 0, 0)
         pos_row.setSpacing(T.unit)
-        pos_row.addWidget(QLabel("Position"))
+        pos_name = QLabel("Position")
+        pos_name.setObjectName("FieldLabel")
+        pos_row.addWidget(pos_name)
         pos_row.addWidget(self.pos_slider, 1)
         pos_row.addWidget(self.pos_label)
 

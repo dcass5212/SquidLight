@@ -315,11 +315,10 @@ class KeyboardCanvas(QWidget):
 
     def paintEvent(self, _event) -> None:
         self._geometry()
+        # no frame: the keyboard sits on whatever surface holds it and lights it
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
-        p.setBrush(qcolor(T.well))
-        p.drawRoundedRect(QRectF(self.rect()), T.radius, T.radius)
 
         n = self._group.led_count
         frame = self._frame
@@ -333,7 +332,7 @@ class KeyboardCanvas(QWidget):
         # the keyboard case
         p.setOpacity(level)
         p.setBrush(qcolor(T.kb_body))
-        p.setPen(QPen(qcolor(T.border), 1))
+        p.setPen(QPen(qcolor(T.track if self._pitch >= 26 else T.border), 1))
         p.drawRoundedRect(self._body, self._pitch * 0.25, self._pitch * 0.25)
 
         # light spilling onto the case around the keys

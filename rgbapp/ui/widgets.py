@@ -112,6 +112,7 @@ class LedPreview(QWidget):
 
     def __init__(self, group: Optional[DeviceGroup] = None, clickable: bool = False, parent=None) -> None:
         super().__init__(parent)
+        self.framed = False  # draw a dark inset behind the LEDs (off: they light the surface)
         self._group: Optional[DeviceGroup] = None
         self._layout: Optional[_PreviewLayout] = None
         self._frame: Optional[np.ndarray] = None
@@ -227,8 +228,9 @@ class LedPreview(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
-        p.setBrush(qcolor(T.well))
-        p.drawRoundedRect(QRectF(self.rect()), T.radius, T.radius)
+        if self.framed:
+            p.setBrush(qcolor(T.well))
+            p.drawRoundedRect(QRectF(self.rect()), T.radius, T.radius)
 
         if self._group is None or not self._group.led_count:
             p.setPen(qcolor(T.muted))
@@ -348,7 +350,7 @@ class PercentSlider(QWidget):
         self.slider.setAccessibleName(accessible_name)
         self.label = QLabel("100%")
         self.label.setObjectName("ValueLabel")
-        self.label.setMinimumWidth(36)
+        self.label.setMinimumWidth(40)
         self.label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
@@ -384,8 +386,9 @@ class ColorSwatch(QPushButton):
         super().__init__(parent)
         self._color = "#ffffff"
         self._name = name
-        self.setFixedSize(34, 34)
+        self.setFixedSize(T.control_h, T.control_h)
         self.setCursor(Qt.PointingHandCursor)
+        self.setAttribute(Qt.WA_Hover)
         self.setAccessibleName(name)
         self.setToolTip(f"Change {name.lower()}")
         self.clicked.connect(self._pick)
@@ -421,13 +424,16 @@ class ColorSwatch(QPushButton):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         focused = keyboard_focused(self)
-        p.setPen(QPen(qcolor(T.accent if focused else T.border), 1.5 if focused else 1))
+        hover = self.underMouse() and self.isEnabled()
+        if not self.isEnabled():
+            p.setOpacity(0.4)
+        p.setPen(QPen(qcolor(T.accent if focused else T.track if hover else T.border), 1.5 if focused else 1))
         p.setBrush(qcolor(T.raised))
         outer = QRectF(self.rect()).adjusted(0.75, 0.75, -0.75, -0.75)
         p.drawRoundedRect(outer, T.radius, T.radius)
-        p.setPen(Qt.NoPen)
+        p.setPen(QPen(QColor(255, 255, 255, 28), 1))  # keeps near-black colors visible
         p.setBrush(QColor(self._color))
-        p.drawRoundedRect(outer.adjusted(5, 5, -5, -5), 3, 3)
+        p.drawRoundedRect(outer.adjusted(4.5, 4.5, -4.5, -4.5), 3, 3)
 
 
 # --------------------------------------------------------------------------- device controls
@@ -473,20 +479,22 @@ class DeviceControls(QWidget):
             row = QHBoxLayout(self)
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(T.unit * 1.5)
+            bright_label.setText("Device brightness")
             row.addWidget(bright_label)
             row.addWidget(self.brightness, 3)
-            row.addSpacing(T.unit * 2)
+            row.addSpacing(T.unit * 3)
             self.toggle = Toggle()
             self.toggle.setAccessibleName("Lighting on")
-            on_label = QLabel("On")
+            self.toggle.setToolTip("Turn this device's lighting on or off")
+            on_label = QLabel("Lighting")
             on_label.setObjectName("FieldLabel")
             row.addWidget(on_label)
             row.addWidget(self.toggle)
         else:  # dashboard card: two rows
             grid = QGridLayout(self)
             grid.setContentsMargins(0, 0, 0, 0)
-            grid.setHorizontalSpacing(T.unit * 1.5)
-            grid.setVerticalSpacing(T.unit)
+            grid.setHorizontalSpacing(T.unit * 2)
+            grid.setVerticalSpacing(T.unit * 1.5)
             grid.addWidget(effect_label, 0, 0)
             grid.addWidget(self.effect, 0, 1)
             grid.addWidget(self.swatch, 0, 2)

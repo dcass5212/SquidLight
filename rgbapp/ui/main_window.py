@@ -32,13 +32,16 @@ CHIP_MAX_TEXT_PX = 380
 
 
 class StatusChip(QFrame):
-    """OpenRGB connection state, always visible in the header."""
+    """OpenRGB connection state, always visible in the header. Quiet while connected;
+    it gets a raised chip when something needs attention."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("StatusChip")
+        self.setProperty("problem", False)
+        self.setAttribute(Qt.WA_StyledBackground)
         row = QHBoxLayout(self)
-        row.setContentsMargins(10, 5, 12, 5)
+        row.setContentsMargins(12, 6, 14, 6)
         row.setSpacing(T.unit)
         self.dot = StatusDot()
         self.label = QLabel()
@@ -48,6 +51,12 @@ class StatusChip(QFrame):
 
     def set_status(self, status) -> None:
         self.full_text = status.text
+        problem = status.state != "connected"
+        if self.property("problem") != problem:
+            self.setProperty("problem", problem)
+            for w in (self, self.label):
+                w.style().unpolish(w)
+                w.style().polish(w)
         self.dot.set_color(status_color(status.state))
         metrics = self.label.fontMetrics()
         self.label.setText(metrics.elidedText(status.text, Qt.ElideRight, CHIP_MAX_TEXT_PX))
@@ -86,32 +95,48 @@ class MainWindow(QMainWindow):
 
         header = QFrame()
         header.setObjectName("Header")
+        header.setFixedHeight(T.unit * 10)
         hrow = QHBoxLayout(header)
-        hrow.setContentsMargins(T.unit * 3, T.unit * 2, T.unit * 3, T.unit * 2)
+        hrow.setContentsMargins(T.unit * 4, 0, T.unit * 3, 0)
         hrow.setSpacing(T.unit * 1.5)
+        titles = QVBoxLayout()
+        titles.setSpacing(0)
+        titles.addStretch(1)
         self.title = QLabel("Dashboard")
         self.title.setObjectName("PageTitle")
-        hrow.addWidget(self.title)
+        self.subtitle = QLabel()
+        self.subtitle.setObjectName("PageSubtitle")
+        titles.addWidget(self.title)
+        titles.addWidget(self.subtitle)
+        titles.addStretch(1)
+        hrow.addLayout(titles)
         hrow.addStretch(1)
         self.chip = StatusChip()
         hrow.addWidget(self.chip)
-        self.unsaved = QLabel("● Unsaved changes")
-        self.unsaved.setObjectName("Caption")
-        self.unsaved.setStyleSheet(f"color: {T.warn};")
+        hrow.addSpacing(T.unit)
+        self.unsaved = QLabel("Unsaved changes")
+        self.unsaved.setObjectName("Unsaved")
         self.unsaved.setAccessibleName("Unsaved changes to this profile")
-        self.save_btn = QPushButton("Save")
-        self.save_btn.setToolTip("Keep these changes in the active profile")
-        self.save_btn.clicked.connect(bridge.save_profile)
         self.revert_btn = QPushButton("Revert")
+        self.revert_btn.setObjectName("GhostButton")
         self.revert_btn.setToolTip("Throw away changes and go back to the saved profile")
         self.revert_btn.clicked.connect(bridge.revert_profile)
-        for w in (self.unsaved, self.save_btn, self.revert_btn):
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setObjectName("AccentButton")
+        self.save_btn.setToolTip("Keep these changes in the active profile")
+        self.save_btn.clicked.connect(bridge.save_profile)
+        for w in (self.unsaved, self.revert_btn, self.save_btn):
             hrow.addWidget(w)
+        hrow.addSpacing(T.unit)
+        profile_label = QLabel("Profile")
+        profile_label.setObjectName("FieldLabel")
+        hrow.addWidget(profile_label)
         self.profile = QComboBox()
         self.profile.setAccessibleName("Profile")
-        self.profile.setMinimumWidth(160)
-        self.profile.setToolTip("Active profile")
+        self.profile.setMinimumWidth(168)
+        self.profile.setToolTip("The active profile. Switching asks first if you have unsaved changes.")
         self.profile.activated.connect(self._profile_picked)
+        profile_label.setBuddy(self.profile)
         hrow.addWidget(self.profile)
         content.addWidget(header)
 
@@ -125,6 +150,7 @@ class MainWindow(QMainWindow):
         self._add_page(PROFILES, ProfilesPage(bridge))
         self._add_page(SETTINGS, SettingsPage(bridge))
         self._titles = {DASHBOARD: "Dashboard", PROFILES: "Profiles", SETTINGS: "Settings"}
+        self._subtitles: dict[str, str] = {}
 
         self.sidebar.navigate.connect(self.show_page)
         bridge.groups_changed.connect(self._on_groups)
@@ -171,10 +197,12 @@ class MainWindow(QMainWindow):
             self.stack.removeWidget(w)
             w.deleteLater()
             self._titles.pop(pid, None)
+            self._subtitles.pop(pid, None)
         for g in groups:
             pid = device_page_id(g.key)
             self._add_page(pid, DevicePage(self.bridge, g))
             self._titles[pid] = group_label(g)
+            self._subtitles[pid] = f"{g.name}, {g.led_count} LEDs"
         self.sidebar.set_groups(groups)
         self.sidebar.set_health({g.key: self.bridge.health(g.key) for g in groups})
         self.show_page(current if current in self.pages else DASHBOARD)
@@ -189,6 +217,9 @@ class MainWindow(QMainWindow):
             return
         self.stack.setCurrentWidget(page)
         self.title.setText(self._titles.get(page_id, ""))
+        sub = self._subtitles.get(page_id, "")
+        self.subtitle.setText(sub)
+        self.subtitle.setVisible(bool(sub))
         self.sidebar.select(page_id)
 
     # -- window

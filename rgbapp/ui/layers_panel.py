@@ -30,12 +30,24 @@ from ..engine.compositor import BLEND_MODES, LayerSpec
 from ..engine.devices import DeviceGroup
 from ..engine.effects import get_effect_class, listed_effects
 from .effect_library import EffectLibrary
-from .param_editors import make_editor
+from .param_editors import NumberEditor, make_editor
 from .theme import T, qcolor
 from .widgets import PercentSlider, guard_wheel, keyboard_focused, track_focus_reason
 
 PANEL_WIDTH = 340
 LIST_MAX_HEIGHT = 280  # about four rows; more scroll
+
+
+def _clear_layout(layout) -> None:
+    """Remove and delete everything in ``layout``, nested layouts included."""
+    while layout.count():
+        item = layout.takeAt(0)
+        if item.widget() is not None:
+            item.widget().setParent(None)
+            item.widget().deleteLater()
+        elif item.layout() is not None:
+            _clear_layout(item.layout())
+            item.layout().deleteLater()
 
 
 def effect_name(effect_id: str) -> str:
@@ -156,11 +168,11 @@ class LayerRow(QFrame):
         top.addWidget(self.delete)
         bottom = QHBoxLayout()
         bottom.setContentsMargins(32, 0, 4, 0)
-        bottom.setSpacing(T.unit)
+        bottom.setSpacing(T.unit * 1.5)
         bottom.addWidget(self.blend)
         bottom.addWidget(self.opacity, 1)
         col = QVBoxLayout(self)
-        col.setContentsMargins(6, 4, 4, 8)
+        col.setContentsMargins(T.unit, 4, 4, T.unit)
         col.setSpacing(2)
         col.addLayout(top)
         col.addLayout(bottom)
@@ -189,6 +201,15 @@ class LayerRow(QFrame):
         if e.button() == Qt.LeftButton:
             self.clicked.emit(self.layer_id)
         super().mousePressEvent(e)
+
+    def paintEvent(self, e) -> None:
+        super().paintEvent(e)
+        if self.property("selected"):  # the same marker the sidebar uses for "selected"
+            p = QPainter(self)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(Qt.NoPen)
+            p.setBrush(qcolor(T.accent))
+            p.drawRoundedRect(QRectF(0.5, 12, 3, self.height() - 24), 1.5, 1.5)
 
 
 class LayerList(QWidget):
@@ -284,13 +305,20 @@ class LayerProperties(QWidget):
         self.col.addStretch(1)
 
     @staticmethod
-    def _field(label: str, widget: QWidget) -> QVBoxLayout:
+    def _field(label: str, widget: QWidget, value: Optional[QWidget] = None) -> QVBoxLayout:
+        """A label over its control; ``value`` (a slider's readout) sits at the label's right."""
         box = QVBoxLayout()
-        box.setSpacing(6)
+        box.setSpacing(4)
+        head = QHBoxLayout()
+        head.setSpacing(T.unit)
         lab = QLabel(label)
         lab.setObjectName("FieldLabel")
         lab.setWordWrap(True)  # long labels must not widen the panel
-        box.addWidget(lab)
+        lab.setBuddy(widget)
+        head.addWidget(lab, 1)
+        if value is not None:
+            head.addWidget(value, 0, Qt.AlignRight | Qt.AlignBottom)
+        box.addLayout(head)
         box.addWidget(widget)
         return box
 
@@ -321,15 +349,7 @@ class LayerProperties(QWidget):
         self.notice.setVisible(bool(text))
 
     def _build_params(self, effect_id: str) -> None:
-        while self._params_box.count():
-            item = self._params_box.takeAt(0)
-            layout = item.layout()
-            if layout is not None:
-                while layout.count():
-                    w = layout.takeAt(0).widget()
-                    if w is not None:
-                        w.setParent(None)
-                        w.deleteLater()
+        _clear_layout(self._params_box)
         self.editors = {}
         for p in get_effect_class(effect_id).params:
             if p.hidden:
@@ -338,7 +358,8 @@ class LayerProperties(QWidget):
             guard_wheel(*(w for w in editor.findChildren(QWidget) if isinstance(w, (QComboBox, QSlider))))
             editor.value_changed.connect(lambda v, pid=p.id: self.param_changed.emit(pid, v))
             self.editors[p.id] = editor
-            self._params_box.addLayout(self._field(p.label, editor))
+            readout = editor.take_readout() if isinstance(editor, NumberEditor) else None
+            self._params_box.addLayout(self._field(p.label, editor, readout))
 
     def _sync_mask(self, mask) -> None:
         self.mask.blockSignals(True)
@@ -386,14 +407,19 @@ class LayersPanel(QFrame):
         self._drag: Optional[str] = None
 
         col = QVBoxLayout(self)
-        col.setContentsMargins(T.unit * 2, T.unit * 2, T.unit * 2, T.unit * 2)
+        col.setContentsMargins(T.unit * 2, T.unit * 3, T.unit * 2, T.unit * 2)
         col.setSpacing(T.unit * 1.5)
 
         head = QHBoxLayout()
+        names = QVBoxLayout()
+        names.setSpacing(2)
         title = QLabel("Layers")
         title.setObjectName("PanelTitle")
-        head.addWidget(title)
-        head.addStretch(1)
+        order_hint = QLabel("Upper layers draw over lower ones")
+        order_hint.setObjectName("Caption")
+        names.addWidget(title)
+        names.addWidget(order_hint)
+        head.addLayout(names, 1)
         self.add_button = QPushButton("+ Add effect")
         self.add_button.setObjectName("AccentButton")
         self.add_button.setCursor(Qt.PointingHandCursor)
@@ -410,7 +436,7 @@ class LayersPanel(QFrame):
         self.list_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         col.addWidget(self.list_scroll)
-        self.empty = QLabel("No layers. Add an effect to light this device.")
+        self.empty = QLabel("No layers yet. Add an effect to light this device.")
         self.empty.setObjectName("Caption")
         self.empty.setWordWrap(True)
         col.addWidget(self.empty)
@@ -503,7 +529,7 @@ class LayersPanel(QFrame):
             row.set_selected(lid == self.selected)
         spec = by_id.get(self.selected) if self.selected else None
         self.props.setVisible(spec is not None)
-        self.props_title.setText(f"{effect_name(spec.effect)} properties" if spec else "Properties")
+        self.props_title.setText("Layer settings" if spec else "Properties")
         if spec is not None:
             self.props.show_layer(spec)
         self._show_notice()

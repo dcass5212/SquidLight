@@ -75,21 +75,29 @@ def run_off_thread(owner: QWidget, fn: Callable, done: Callable) -> Future:
 
 
 
-def _card(title: str, subtitle: str = "") -> tuple[QFrame, QVBoxLayout]:
-    box = QFrame()
-    box.setObjectName("Card")
-    col = QVBoxLayout(box)
-    col.setContentsMargins(T.unit * 2.5, T.unit * 2, T.unit * 2.5, T.unit * 2.5)
-    col.setSpacing(T.unit * 1.5)
+def _card(title: str, subtitle: str = "") -> tuple[QWidget, QVBoxLayout]:
+    """A settings section: its title (and a line about it) above a grouped surface.
+    Returns the section and the surface's layout to fill."""
+    section = QWidget()
+    outer = QVBoxLayout(section)
+    outer.setContentsMargins(0, 0, 0, 0)
+    outer.setSpacing(T.unit)
     t = QLabel(title)
-    t.setObjectName("CardTitle")
-    col.addWidget(t)
+    t.setObjectName("SectionTitle")
+    outer.addWidget(t)
     if subtitle:
         s = QLabel(subtitle)
         s.setObjectName("Muted")
         s.setWordWrap(True)
-        col.addWidget(s)
-    return box, col
+        outer.addWidget(s)
+    outer.addSpacing(T.unit / 2)
+    box = QFrame()
+    box.setObjectName("Group")
+    outer.addWidget(box)
+    col = QVBoxLayout(box)
+    col.setContentsMargins(T.unit * 2.5, T.unit * 2, T.unit * 2.5, T.unit * 2)
+    col.setSpacing(T.unit * 2)
+    return section, col
 
 
 def _row(label: str, hint: str, control: QWidget | QHBoxLayout) -> QHBoxLayout:
@@ -167,18 +175,19 @@ class SettingsPage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         outer.addWidget(scroll)
         holder = QWidget()
         scroll.setWidget(holder)
         hrow = QHBoxLayout(holder)
-        hrow.setContentsMargins(T.unit * 3, T.unit * 3, T.unit * 3, T.unit * 4)
+        hrow.setContentsMargins(T.unit * 4, T.unit * 3, T.unit * 3, T.unit * 5)
         body = QWidget()
         body.setMaximumWidth(PAGE_MAX_WIDTH)
         hrow.addWidget(body, 1)
         hrow.addStretch(0)
         col = QVBoxLayout(body)
         col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(T.unit * 2)
+        col.setSpacing(T.unit * 4)
 
         col.addWidget(self._build_openrgb())
         col.addWidget(self._build_startup())
@@ -200,8 +209,12 @@ class SettingsPage(QWidget):
         box, col = _card("OpenRGB", "SquidLight controls your devices through OpenRGB, which runs in the background.")
         status = QHBoxLayout()
         status.setSpacing(T.unit)
-        self.status_dot = StatusDot(diameter=10)
-        status.addWidget(self.status_dot, 0, Qt.AlignTop | Qt.AlignHCenter)
+        self.status_dot = StatusDot(diameter=8)
+        dot_box = QVBoxLayout()
+        dot_box.setContentsMargins(0, 6, 0, 0)  # centred on the first line of text
+        dot_box.addWidget(self.status_dot)
+        dot_box.addStretch(1)
+        status.addLayout(dot_box)
         self.status_text = QLabel()
         self.status_text.setWordWrap(True)
         self.status_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -230,6 +243,7 @@ class SettingsPage(QWidget):
         reset.clicked.connect(self._use_bundled)
         path_row.addWidget(reset)
         col.addLayout(_row("Program", "Leave empty to use the bundled OpenRGB.", path_row))
+        col.addWidget(_rule())
 
         self.port = QSpinBox()
         self.port.setRange(1024, 65535)
@@ -240,12 +254,13 @@ class SettingsPage(QWidget):
         guard_wheel(self.port)
         col.addLayout(_row("SDK port", "The local port SquidLight talks to OpenRGB on (normally 6742).", self.port))
 
+        col.addWidget(_rule())
         actions = QHBoxLayout()
         actions.setSpacing(T.unit * 1.5)
         self.pending = QLabel("Restart OpenRGB to use the new program or port.")
-        self.pending.setObjectName("Caption")
-        self.pending.setStyleSheet(f"color: {T.warn};")
-        actions.addWidget(self.pending, 1)
+        self.pending.setObjectName("Unsaved")
+        actions.addWidget(self.pending)
+        actions.addStretch(1)
         self.restart_btn = QPushButton("Restart OpenRGB")
         self.restart_btn.setToolTip("Hands your devices back, restarts OpenRGB, and applies your lighting again")
         self.restart_btn.clicked.connect(self._restart)
@@ -295,6 +310,7 @@ class SettingsPage(QWidget):
         pending = self.bridge.server_settings_pending()
         self.pending.setVisible(pending)
         self.restart_btn.setObjectName("AccentButton" if pending else "")
+        self.restart_btn.setCursor(Qt.PointingHandCursor)
         self.restart_btn.style().unpolish(self.restart_btn)
         self.restart_btn.style().polish(self.restart_btn)
 
@@ -310,6 +326,7 @@ class SettingsPage(QWidget):
         self.autostart.setChecked(autostart.is_enabled())
         self.autostart.toggled.connect(self._toggle_autostart)
         col.addLayout(_row("Start with Windows", "Your lighting comes on when you sign in.", self.autostart))
+        col.addWidget(_rule())
         self.minimized = Toggle()
         self.minimized.setChecked(self.bridge.app_settings.start_minimized)
         self.minimized.toggled.connect(self._toggle_minimized)
@@ -412,6 +429,7 @@ class SettingsPage(QWidget):
         refresh.clicked.connect(self._list_devices)
         audio.addWidget(refresh)
         col.addLayout(_row("Audio device", "What the audio effects listen to.", audio))
+        col.addWidget(_rule())
 
         sensors = QHBoxLayout()
         sensors.setSpacing(T.unit)
@@ -491,7 +509,7 @@ class SettingsPage(QWidget):
     # -- log and about
 
     def _build_log(self) -> QFrame:
-        box, col = _card("Log", "What SquidLight and its OpenRGB connection have been doing. Useful when something isn't lighting up.")
+        box, col = _card("Log", "What SquidLight and its OpenRGB connection have been doing. Check here when something isn't lighting up.")
         self.log_viewer = LogViewer(log_dir() / "app.log")
         col.addWidget(self.log_viewer)
         return box
@@ -510,7 +528,7 @@ class SettingsPage(QWidget):
         license_file = licenses_dir() / "OpenRGB-GPL-2.0.txt"
         links = QLabel(
             f'<a href="{OPENRGB_SOURCE_URL}" style="color:{T.accent}">OpenRGB source code</a>'
-            f' &nbsp;·&nbsp; <a href="{QUrl.fromLocalFile(str(license_file)).toString()}" '
+            f'&nbsp;&nbsp;&nbsp;&nbsp;<a href="{QUrl.fromLocalFile(str(license_file)).toString()}" '
             f'style="color:{T.accent}">OpenRGB license (GPL-2.0)</a>'
         )
         links.setTextFormat(Qt.RichText)

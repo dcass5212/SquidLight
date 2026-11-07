@@ -35,25 +35,39 @@ class _ZoneRow(QFrame):
 
     def __init__(self, bridge, key: str, ref: ZoneRef, parent=None) -> None:
         super().__init__(parent)
-        self.setObjectName("LayerRow")
+        self.setObjectName("ZoneRow")
         self.setProperty("selected", False)
+        self.setAttribute(Qt.WA_StyledBackground)
         self.bridge, self.key, self.ref = bridge, key, ref
 
-        row = QHBoxLayout(self)
-        row.setContentsMargins(T.unit, T.unit, T.unit, T.unit)
-        row.setSpacing(T.unit)
+        # A resizable header gets two lines (name, then its controls) so it fits narrow windows
+        col = QVBoxLayout(self)
+        col.setContentsMargins(T.unit / 2, T.unit / 2, T.unit, T.unit / 2)
+        col.setSpacing(2)
+        top = QHBoxLayout()
+        top.setSpacing(T.unit)
+        col.addLayout(top)
+        if ref.info.resizable:
+            row = QHBoxLayout()
+            row.setContentsMargins(T.unit, 0, 0, T.unit / 2)
+            row.setSpacing(T.unit)
+            col.addLayout(row)
+        else:
+            row = top
 
         self.pick = QPushButton(ref.label)
+        self.pick.setObjectName("ZonePick")
         self.pick.setCheckable(True)
         self.pick.setCursor(Qt.PointingHandCursor)
         self.pick.setToolTip("Select this zone: it is outlined in the preview")
         self.pick.setAccessibleName(f"Select {ref.label}")
         self.pick.clicked.connect(lambda _c=False: self.selected.emit(ref.name))
-        row.addWidget(self.pick, 1)
+        top.addWidget(self.pick)
 
         self.count = QLabel()
         self.count.setObjectName("Caption")
-        row.addWidget(self.count)
+        top.addWidget(self.count)
+        top.addStretch(1)
 
         self.size_edit: Optional[QSpinBox] = None
         self.apply_btn: Optional[QPushButton] = None
@@ -66,9 +80,15 @@ class _ZoneRow(QFrame):
                 "OpenRGB cannot detect this for addressable headers."
             )
             self.size_edit.setValue(ref.info.size)
+            self.size_edit.setFixedWidth(72)
+            self.size_edit.setAlignment(Qt.AlignRight)
             guard_wheel(self.size_edit)
             self.size_edit.valueChanged.connect(self._size_typed)
             self.size_edit.lineEdit().returnPressed.connect(self._apply_size)
+            size_label = QLabel("LED count")
+            size_label.setObjectName("FieldLabel")
+            size_label.setBuddy(self.size_edit)
+            row.addWidget(size_label)
             row.addWidget(self.size_edit)
             self.apply_btn = QPushButton("Set")
             self.apply_btn.setAccessibleName(f"Apply {ref.label} LED count")
@@ -76,13 +96,16 @@ class _ZoneRow(QFrame):
             self.apply_btn.setEnabled(False)
             self.apply_btn.clicked.connect(self._apply_size)
             row.addWidget(self.apply_btn)
+            row.addStretch(1)
 
         self.swatch = ColorSwatch(f"{ref.label} color")
         self.swatch.setToolTip(f"Light {ref.label} one color")
         self.swatch.color_changed.connect(self._color_changed)
         row.addWidget(self.swatch)
 
-        self.effect_btn = QPushButton("Effect")
+        self.effect_btn = QPushButton("Add effect")
+        self.effect_btn.setObjectName("MenuButton")
+        self.effect_btn.setCursor(Qt.PointingHandCursor)
         self.effect_btn.setAccessibleName(f"{ref.label} effect")
         self.effect_btn.setToolTip("Add an effect layer that applies to this zone only")
         menu = QMenu(self.effect_btn)
@@ -98,7 +121,7 @@ class _ZoneRow(QFrame):
     def set_ref(self, ref: ZoneRef) -> None:
         self.ref = ref
         n = ref.info.size
-        self.count.setText("not set" if n == 0 and ref.info.resizable else f"{n} LED{'s' if n != 1 else ''}")
+        self.count.setText("No LEDs set" if n == 0 and ref.info.resizable else f"{n} LED{'s' if n != 1 else ''}")
         empty = n == 0
         self.swatch.setEnabled(not empty)
         self.effect_btn.setEnabled(not empty)
@@ -178,7 +201,7 @@ class ZonePanel(QFrame):
 
         col = QVBoxLayout(self)
         col.setContentsMargins(T.unit * 2, T.unit * 2, T.unit * 2, T.unit * 2)
-        col.setSpacing(T.unit)
+        col.setSpacing(T.unit / 2)
 
         title = QLabel("Zones")
         title.setObjectName("CardTitle")
@@ -188,6 +211,7 @@ class ZonePanel(QFrame):
         self.hint.setObjectName("Caption")
         self.hint.setWordWrap(True)
         col.addWidget(self.hint)
+        col.addSpacing(T.unit)
 
         self.empty_note = QLabel(
             "OpenRGB can't tell how many LEDs addressable headers drive. Enter the total for each "
@@ -206,18 +230,31 @@ class ZonePanel(QFrame):
             col.addWidget(row)
 
         self.sync_row = QWidget()
-        sync = QHBoxLayout(self.sync_row)
-        sync.setContentsMargins(0, T.unit, 0, 0)
-        self.sync = Toggle()
-        self.sync.setAccessibleName("Sync with keyboard")
-        self.sync.setToolTip("Mirror the keyboard's top effect onto this device")
+        sync_col = QVBoxLayout(self.sync_row)
+        sync_col.setContentsMargins(0, T.unit, 0, 0)
+        sync_col.setSpacing(T.unit * 1.5)
+        rule = QFrame()
+        rule.setObjectName("Rule")
+        rule.setFixedHeight(1)
+        sync_col.addWidget(rule)
+        sync = QHBoxLayout()
+        sync.setContentsMargins(T.unit, 0, T.unit, 0)
+        sync.setSpacing(T.unit * 2)
+        texts = QVBoxLayout()
+        texts.setSpacing(2)
         label = QLabel("Sync with keyboard")
+        label.setObjectName("SettingName")
         self.sync_note = QLabel()
         self.sync_note.setObjectName("Caption")
         self.sync_note.setWordWrap(True)
-        sync.addWidget(self.sync)
-        sync.addWidget(label)
-        sync.addWidget(self.sync_note, 1)
+        texts.addWidget(label)
+        texts.addWidget(self.sync_note)
+        self.sync = Toggle()
+        self.sync.setAccessibleName("Sync with keyboard")
+        self.sync.setToolTip("Mirror the keyboard's top effect onto this device")
+        sync.addLayout(texts, 1)
+        sync.addWidget(self.sync, 0, Qt.AlignVCenter)
+        sync_col.addLayout(sync)
         col.addWidget(self.sync_row)
         self.sync_row.setVisible(self.key != "keyboard")
         self.sync.toggled.connect(self._sync_toggled)
@@ -253,7 +290,9 @@ class ZonePanel(QFrame):
         self.sync.setChecked(synced)
         self.sync.blockSignals(False)
         self.sync_note.setText(
-            "Following the keyboard's top effect. Turn off to edit this device's own layers." if synced else ""
+            "Following the keyboard's top effect. Turn off to edit this device's own layers."
+            if synced
+            else "Mirror the keyboard's top effect here instead of this device's own layers."
         )
         for row in self.rows.values():
             row.set_actions_enabled(not synced)

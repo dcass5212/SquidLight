@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -37,20 +38,31 @@ class DevicePage(QWidget):
         left = QVBoxLayout()
         left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(0)
-        body = QVBoxLayout()
-        body.setContentsMargins(T.unit * 3, T.unit * 3, T.unit * 3, T.unit * 3)
-        body.setSpacing(T.unit * 1.5)
+        # the canvas column scrolls when the zones list and the canvas don't both fit
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        holder = QWidget()
+        scroll.setWidget(holder)
+        body = QVBoxLayout(holder)
+        body.setContentsMargins(T.unit * 4, T.unit * 3, T.unit * 4, T.unit * 3)
+        body.setSpacing(T.unit * 2)
         self.preview = make_preview(group)
-        self.preview.setMinimumHeight(260)
+        self.preview.setMinimumHeight(220)
         self.paint: PaintPanel | None = None
         self.mode_buttons: dict[str, QPushButton] = {}
-        if isinstance(self.preview, KeyboardCanvas):
-            body.addLayout(self._mode_bar())
+        keyboard = isinstance(self.preview, KeyboardCanvas)
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(T.unit * 2)
+        if keyboard:
+            toolbar.addWidget(self._mode_bar())
+        toolbar.addStretch(1)
+        self.hint = QLabel("Hover a key to see its name" if keyboard else "Click an LED to select its zone")
+        self.hint.setObjectName("Caption")
+        toolbar.addWidget(self.hint)
+        body.addLayout(toolbar)
         body.addWidget(self.preview, 1)
-        hint = " Hover a key to see its name." if isinstance(self.preview, KeyboardCanvas) else ""
-        note = QLabel(f"{group.name}, {group.led_count} LEDs.{hint}")
-        note.setObjectName("Caption")
-        body.addWidget(note)
         # Memory, Mainboard and the like: zones to pick, size and color (M5)
         self.zones: ZonePanel | None = None
         if isinstance(self.preview, LedPreview) and group.zone_refs:
@@ -58,12 +70,14 @@ class DevicePage(QWidget):
             self.preview.empty_text = "Set an LED count for a header below to light it"
             self.zones = ZonePanel(bridge, group)
             body.addWidget(self.zones)
-        left.addLayout(body, 1)
+        else:
+            self.hint.setVisible(keyboard)
+        left.addWidget(scroll, 1)
 
         bar = QFrame()
         bar.setObjectName("BottomBar")
         bar_row = QHBoxLayout(bar)
-        bar_row.setContentsMargins(T.unit * 3, T.unit * 2, T.unit * 3, T.unit * 2)
+        bar_row.setContentsMargins(T.unit * 4, T.unit * 2, T.unit * 4, T.unit * 2)
         self.controls = DeviceControls(bridge, group.key, inline=True)
         bar_row.addWidget(self.controls)
         left.addWidget(bar)
@@ -91,9 +105,13 @@ class DevicePage(QWidget):
 
     # -- Effects / Paint mode (keyboard only)
 
-    def _mode_bar(self) -> QHBoxLayout:
-        bar = QHBoxLayout()
-        bar.setSpacing(0)
+    def _mode_bar(self) -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("Segmented")
+        frame.setAttribute(Qt.WA_StyledBackground)
+        bar = QHBoxLayout(frame)
+        bar.setContentsMargins(3, 3, 3, 3)
+        bar.setSpacing(2)
         buttons = QButtonGroup(self)
         for mode, text, tip in (
             ("effects", "Effects", "Stack effects as layers"),
@@ -108,8 +126,7 @@ class DevicePage(QWidget):
             self.mode_buttons[mode] = b
             b.clicked.connect(lambda _c=False, m=mode: self.set_mode(m))
         self.mode_buttons["effects"].setChecked(True)
-        bar.addStretch(1)
-        return bar
+        return frame
 
     @property
     def mode(self) -> str:
@@ -122,6 +139,9 @@ class DevicePage(QWidget):
         painting = mode == "paint"
         self.right.setCurrentWidget(self.paint if painting else self.layers)
         self.preview.set_paint_mode(painting)
+        self.hint.setText(
+            "Drag to select a box, Shift-click to add" if painting else "Hover a key to see its name"
+        )
         if painting:
             self.paint.sync()
         else:
