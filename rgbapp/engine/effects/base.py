@@ -118,7 +118,9 @@ class Ctx:
     t: float  # seconds since the loop started
     dt: float  # seconds since the previous frame
     led_positions: np.ndarray  # (n, 2) float, normalized x, y in 0..1
-    inputs: dict = field(default_factory=dict)  # audio / keys / stats snapshots (M7)
+    inputs: dict = field(default_factory=dict)  # "audio" / "keys" / "stats" snapshots, for running inputs
+    led_names: tuple = ()  # OpenRGB name of each LED ("Key: A"); lets key effects find their LEDs
+    aspect: float = 1.0  # width / height of the device's layout, so distances can be true to shape
 
     @property
     def n(self) -> int:
@@ -137,6 +139,15 @@ class Effect:
     params: ClassVar[list[Param]] = []
     needs: ClassVar[set[str]] = set()  # {"audio"}, {"keys"}, {"cpu"}: inputs to start
     listed: ClassVar[bool] = True  # False: made by a tool (Paint), not offered in the effect library
+
+    # Set by ``render`` when the effect can't do its job (no sensor source, ...). The UI shows it.
+    notice: Optional[str] = None
+
+    @classmethod
+    def required_inputs(cls, params: dict) -> set[str]:
+        """Inputs to run for these params. Defaults to ``needs``; an effect whose source is a
+        param (CPU vs GPU) overrides it so unused inputs stay off."""
+        return set(cls.needs)
 
     @classmethod
     def resolve_params(cls, raw: Optional[dict] = None) -> dict:

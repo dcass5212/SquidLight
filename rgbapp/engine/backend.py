@@ -84,6 +84,10 @@ class Backend(Protocol):
     def close(self) -> None:
         """Restore each device's original mode and colors, then disconnect."""
 
+    # Optional: ``reassert()`` puts every writable device back in Direct mode without
+    # reconnecting (after the PC resumes from sleep a USB device may have reset itself).
+    # The loop calls it only if the backend has it.
+
 
 # --------------------------------------------------------------------------- reconnect
 
@@ -149,6 +153,7 @@ class FakeBackend:
         self._clock = clock
         self._devices = self._build(keyboard_leds, ram_sticks, ram_leds, board_zone_sizes)
         self.resizes: list[tuple[str, str, int]] = []  # (device_id, zone name, size), for tests
+        self.reasserts = 0
 
     @staticmethod
     def _build(kb: int, sticks: int, ram_leds: int, board: tuple[int, ...]) -> list[DeviceInfo]:
@@ -247,6 +252,10 @@ class FakeBackend:
         except BackendError:
             return False
         return True
+
+    def reassert(self) -> None:
+        if self.state is ConnectionState.CONNECTED:
+            self.reasserts += 1
 
     def close(self) -> None:
         self.closed = True
@@ -503,6 +512,21 @@ class OpenRGBBackend:
         st.prev_colors, st.prev_per_led = [], False  # old colors no longer fit this layout
         self._infos = [s.info for s in self._states.values()]
         log.info("resized %s / %s to %d LEDs", st.info.name, zone_name, size)
+
+    def reassert(self) -> None:
+        """Put every writable device back in Direct mode (after resume from sleep)."""
+        if self.state is not ConnectionState.CONNECTED:
+            return
+        for st in self._states.values():
+            if not st.info.writable:
+                continue
+            try:
+                st.device.set_mode("Direct")
+            except Exception as exc:
+                log.warning("could not re-enter Direct mode on %s: %s", st.info.name, exc)
+                self._mark_disconnected(str(exc))  # maintain() reconnects, which retakes Direct
+                return
+        log.info("re-entered Direct mode on %d device(s)", len(self._states))
 
     def _index_of(self, dev) -> int:
         for i, d in enumerate(self._client.devices):

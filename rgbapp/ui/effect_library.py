@@ -28,6 +28,12 @@ _DESCRIPTIONS = {
     "rainbow_wave": "A rainbow sweeping across the device.",
     "gradient_wave": "Your own colors sweeping across the device.",
     "starlight": "Random keys twinkle and fade.",
+    "reactive_typing": "Keys flash when you press them, then fade. Reacts to typing in any app.",
+    "ripple": "A ring spreads out from each key you press.",
+    "audio_spectrum": "Equalizer bars that follow whatever your PC is playing.",
+    "audio_pulse": "The whole device throbs with the bass of your audio.",
+    "cpu_gpu_meter": "A bar that fills with CPU, RAM or GPU load.",
+    "temperature_gradient": "A color that shifts from cool to hot with a temperature. Needs LibreHardwareMonitor.",
 }
 
 

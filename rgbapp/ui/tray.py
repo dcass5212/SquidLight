@@ -98,6 +98,12 @@ class Tray(QObject):
     def hide(self) -> None:
         self.icon.hide()
 
+    def refresh_icons(self) -> None:
+        """Redraw the icons (the lit one uses the accent color)."""
+        self._icon_lit = make_icon(True)
+        self._icon_paused = make_icon(False)
+        self.icon.setIcon(self._icon_paused if self.bridge.host.paused else self._icon_lit)
+
     def notify(self, title: str, text: str) -> None:
         self.icon.showMessage(title, text, self._icon_lit, 6000)
 

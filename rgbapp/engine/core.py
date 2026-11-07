@@ -12,6 +12,7 @@ from typing import Callable, Optional
 from .backend import Backend, BackendError, ConnectionState
 from .compositor import LayerSpec
 from .devices import DeviceGroup, build_groups
+from .inputs import InputHub
 from .loop import LoopConfig, LoopStats, RenderLoop
 from .openrgb_manager import OpenRGBManager
 
@@ -29,8 +30,13 @@ class Engine:
         backend: Backend,
         config: Optional[LoopConfig] = None,
         manager: Optional[OpenRGBManager] = None,
+        inputs_factory: Optional[Callable[[], InputHub]] = None,
     ) -> None:
         self.backend = backend
+        # Input options from Settings; the default inputs factory reads them.
+        self.audio_device: Optional[str] = None
+        self.lhm_url: Optional[str] = None
+        self.inputs_factory = inputs_factory or self._default_inputs  # tests pass fakes
         self.manager = manager
         self.config = config or LoopConfig()
         self.loop: Optional[RenderLoop] = None
@@ -61,7 +67,7 @@ class Engine:
             groups = build_groups(self.backend.devices())
             if not groups:
                 log.warning("OpenRGB reported no controllable devices with LEDs")
-            self.loop = RenderLoop(self.backend, groups, self.config)
+            self.loop = RenderLoop(self.backend, groups, self.config, inputs=self.inputs_factory())
             if configure is not None:
                 configure(self)
             self.loop.start()
@@ -69,6 +75,9 @@ class Engine:
         except Exception:
             self.stop()  # undo whatever came up
             raise
+
+    def _default_inputs(self) -> InputHub:
+        return InputHub(audio_device=self.audio_device, lhm_url=self.lhm_url)
 
     def _apply_zone_sizes(self) -> None:
         for dev in self.backend.devices():
@@ -100,7 +109,9 @@ class Engine:
         except BackendError as exc:
             error = exc
             log.warning("resize of %s failed: %s", zone_name, exc)
-        self.loop = RenderLoop(self.backend, build_groups(self.backend.devices()), self.config)
+        self.loop = RenderLoop(
+            self.backend, build_groups(self.backend.devices()), self.config, inputs=self.inputs_factory()
+        )
         try:
             if configure is not None:
                 configure(self)
@@ -152,6 +163,34 @@ class Engine:
     def pause(self) -> None:
         self._require_loop().pause()
 
+    # -- options from Settings (thread-safe; they also apply to the next start)
+
+    def set_input_options(self, audio_device: Optional[str], lhm_url: Optional[str]) -> None:
+        self.audio_device, self.lhm_url = audio_device or None, lhm_url or None
+        if self.loop is not None:
+            configure = getattr(self.loop.inputs, "configure", None)
+            if configure is not None:
+                configure(audio_device=self.audio_device, lhm_url=self.lhm_url)
+
+    def set_write_cap(self, hz: Optional[float]) -> None:
+        self.config.max_write_hz = hz
+        if self.loop is not None:
+            self.loop.set_write_cap(hz)
+
+    def reapply(self) -> None:
+        """Retake Direct mode and resend every device in full on the next frame (after
+        resume from sleep a USB device can come back in its own mode)."""
+        if self.loop is not None:
+            self.loop.request_resend(reassert=True)
+
+    def configure_server(self, exe_path: Optional[str], port: int) -> None:
+        """Change which OpenRGB to start and which port to use. Takes effect on the next
+        start: call it while stopped (EngineHost.restart does)."""
+        if self.manager is not None:
+            self.manager.configure(exe_path, port)
+        if hasattr(self.backend, "port"):
+            self.backend.port = port
+
     def resume(self) -> None:
         self._require_loop().resume()
 
@@ -170,6 +209,10 @@ class Engine:
 
     def latest_frames(self) -> dict:
         return self.loop.latest_frames() if self.loop else {}
+
+    def notices(self) -> dict:
+        """group key -> {layer id: notice} for layers that can't work (no sensor source, ...)."""
+        return self.loop.notices() if self.loop else {}
 
     def group_health(self, group_key: str) -> str:
         return self.loop.group_health(group_key) if self.loop else "disconnected"

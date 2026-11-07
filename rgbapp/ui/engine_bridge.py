@@ -7,15 +7,23 @@ reaches the GUI by polling on QTimers, so no engine thread ever touches a Qt obj
 
 from __future__ import annotations
 
+import dataclasses
+import logging
+
 import numpy as np
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from ..engine.host import EngineHost, HostStatus
 from ..engine.rules import Rule, RulesWatcher
+from ..model.app_settings import AppSettings, AppSettingsStore, MemorySettingsStore
 from ..model.profiles import ProfileManager
+
+log = logging.getLogger(__name__)
 
 PREVIEW_INTERVAL_MS = 33  # about 30 Hz, matching the render loop
 STATUS_INTERVAL_MS = 250
+# After resume from sleep, USB devices come back over a few seconds: reapply more than once.
+REAPPLY_DELAYS_MS = (0, 3000, 8000)
 _ORDER = {"keyboard": 0, "memory": 1, "mainboard": 2, "case": 3}
 
 
@@ -33,15 +41,23 @@ class EngineBridge(QObject):
     master_changed = Signal(float)
     paused_changed = Signal(bool)
     profiles_changed = Signal()  # profile list, active/default profile or rules changed
+    notices_changed = Signal(object)  # {group key: {layer id: text}}: layers that can't work right now
     dirty_changed = Signal(bool)  # the live lighting differs from the saved profile
+    app_settings_changed = Signal(object)  # AppSettings
+    accent_changed = Signal(str)
     _rule_profile = Signal(str)  # from the rules thread; queued onto the GUI thread
 
-    def __init__(self, host: EngineHost, parent: QObject | None = None) -> None:
+    def __init__(
+        self, host: EngineHost, parent: QObject | None = None, app_store: AppSettingsStore | None = None
+    ) -> None:
         super().__init__(parent)
         self.host = host
+        self.app_store = app_store if app_store is not None else MemorySettingsStore()
+        self.app_settings: AppSettings = self.app_store.load()
         self._status: HostStatus | None = None
         self._generation = -1
         self._health: dict[str, str] = {}
+        self._notices: dict = {}
         self._last_frames: dict[str, np.ndarray] = {}
 
         self.profiles = ProfileManager(host, host.store)
@@ -94,6 +110,13 @@ class EngineBridge(QObject):
         if health != self._health:
             self._health = health
             self.health_changed.emit(health)
+        notices = self.host.notices()
+        if notices != self._notices:
+            self._notices = notices
+            self.notices_changed.emit(notices)
+
+    def notice(self, key: str, layer_id: str) -> str:
+        return self._notices.get(key, {}).get(layer_id, "")
 
     def poll_frames(self) -> None:
         changed = {}
@@ -256,6 +279,48 @@ class EngineBridge(QObject):
             return
         self.host.set_master_brightness(value)
         self.master_changed.emit(self.host.master_brightness)
+
+    # -- app settings (M8). Saved right away; everything but the OpenRGB path and port
+    # applies live (those need "Restart OpenRGB").
+
+    def update_app_settings(self, **changes) -> AppSettings:
+        old = self.app_settings
+        new = dataclasses.replace(old, **changes).normalized()
+        if new == old:
+            return new
+        self.app_settings = new
+        try:
+            self.app_store.save(new)
+        except OSError:
+            log.exception("could not save settings")
+        if new.write_cap_hz != old.write_cap_hz:
+            self.host.set_write_cap(new.write_cap_hz)
+        if (new.audio_device, new.lhm_url) != (old.audio_device, old.lhm_url):
+            self.host.set_input_options(new.audio_device, new.lhm_url)
+        if new.accent != old.accent:
+            self.accent_changed.emit(new.accent)
+        self.app_settings_changed.emit(new)
+        return new
+
+    def server_settings_pending(self) -> bool:
+        """The saved OpenRGB path/port differ from what the running engine uses."""
+        manager = getattr(self.host.engine, "manager", None)
+        port = getattr(self.host.engine.backend, "port", self.app_settings.openrgb_port)
+        path = manager.configured_exe if manager is not None else self.app_settings.openrgb_path
+        return port != self.app_settings.openrgb_port or path != self.app_settings.openrgb_path
+
+    def restart_openrgb(self) -> None:
+        """Stop and start OpenRGB and the engine (off the GUI thread), using the saved
+        OpenRGB path and port. Pages rebuild when the engine is back."""
+        s = self.app_settings
+        self.host.restart(reconfigure=lambda engine: engine.configure_server(s.openrgb_path or None, s.openrgb_port))
+        self.poll_status()
+
+    def reapply(self) -> None:
+        """Resume from sleep: put devices back in Direct mode and resend, a few times while
+        USB devices come back."""
+        for delay in REAPPLY_DELAYS_MS:
+            QTimer.singleShot(delay, self.host.reapply)
 
     def set_paused(self, paused: bool) -> None:
         if paused == self.host.paused:

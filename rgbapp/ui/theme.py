@@ -52,6 +52,36 @@ TEXT_FAMILIES = ["Segoe UI Variable Text", "Segoe UI", "Arial"]
 DISPLAY_FAMILIES = ["Segoe UI Variable Display", "Segoe UI", "Arial"]
 
 
+# Accent presets offered in Settings (the first is the default). Each reads well on the
+# dark chrome and stays distinct from the warn/error status colors.
+ACCENT_PRESETS = (
+    ("Razer green", "#44d62c"),
+    ("Cyan", "#22c3e6"),
+    ("Blue", "#4c8dff"),
+    ("Violet", "#9b6bff"),
+    ("Pink", "#ff4fa3"),
+    ("Orange", "#ff8a2a"),
+    ("White", "#e8e8e8"),
+)
+
+
+def text_on(hex_: str) -> str:
+    """Text color for a label drawn on ``hex_``: near-black on light colors, white on dark."""
+    c = QColor(hex_)
+    luminance = 0.2126 * c.redF() + 0.7152 * c.greenF() + 0.0722 * c.blueF()
+    return "#0e1a0b" if luminance > 0.45 else "#ffffff"
+
+
+def apply_accent(hex_: str) -> None:
+    """Change the accent everywhere. ``T`` is shared by reference and widgets read it when
+    they paint, so updating it in place (it is frozen against accidents, not this) and
+    rebuilding the stylesheet is enough; the caller re-applies the QSS."""
+    if not QColor.isValidColorName(hex_):
+        return
+    object.__setattr__(T, "accent", QColor(hex_).name())
+    object.__setattr__(T, "on_accent", text_on(T.accent))
+
+
 def qcolor(hex_: str, alpha: int = 255) -> QColor:
     c = QColor(hex_)
     c.setAlpha(alpha)
@@ -168,7 +198,7 @@ QToolTip {{
     background: {t.accent}; color: {t.on_accent}; border: 1px solid {t.accent}; font-weight: 600;
     padding: 5px 12px;
 }}
-#AccentButton:hover {{ background: #5be043; }}
+#AccentButton:hover {{ background: {QColor(t.accent).lighter(115).name()}; }}
 #AccentButton:focus {{ border: 2px solid {t.text}; }}
 #SmallButton {{ padding: 0; font-size: 16px; }}
 #PanelButton {{ padding: 6px 6px; }}

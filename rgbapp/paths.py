@@ -18,3 +18,16 @@ def log_dir() -> Path:
     path = data_dir() / "logs"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def app_dir() -> Path:
+    """The install folder when packaged, the repo root when running from source."""
+    import sys
+
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parents[1]
+
+
+def licenses_dir() -> Path:
+    return app_dir() / "LICENSES"

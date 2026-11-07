@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from .dashboard import DashboardPage
 from .device_page import DevicePage
-from .placeholder_pages import SettingsPage
+from .settings_page import SettingsPage
 from .profiles_page import ProfilesPage, switch_profile
 from .sidebar import DASHBOARD, PROFILES, SETTINGS, Sidebar, device_page_id
 from .theme import T, status_color
@@ -120,6 +120,7 @@ class MainWindow(QMainWindow):
         self.pages: dict[str, QWidget] = {}
         self.dashboard = DashboardPage(bridge)
         self.dashboard.open_device.connect(lambda key: self.show_page(device_page_id(key)))
+        self.dashboard.open_settings.connect(lambda: self.show_page(SETTINGS))
         self._add_page(DASHBOARD, self.dashboard)
         self._add_page(PROFILES, ProfilesPage(bridge))
         self._add_page(SETTINGS, SettingsPage(bridge))

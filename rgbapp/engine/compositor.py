@@ -93,6 +93,18 @@ class Compositor:
             new.append(_Runtime(spec, effect, cls.resolve_params(spec.params), mask))
         self._layers = new
 
+    def needs(self) -> set[str]:
+        """Inputs required by the layers that actually draw (visible, not fully transparent)."""
+        out: set[str] = set()
+        for l in self._layers:
+            if l.spec.visible and l.spec.opacity > 0.0:
+                out |= type(l.effect).required_inputs(l.params)
+        return out
+
+    def notices(self) -> dict[str, str]:
+        """layer id -> why that layer is not working right now."""
+        return {l.spec.id: l.effect.notice for l in self._layers if l.effect.notice}
+
     def render(self, ctx: Ctx) -> np.ndarray:
         n = self.group.led_count
         out = np.zeros((n, 3), dtype=np.float32)

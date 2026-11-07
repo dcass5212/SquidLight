@@ -11,7 +11,7 @@ class ColorCycle(Effect):
     id = "color_cycle"
     name = "Color Cycle"
     params = [
-        Param("speed", "Speed (cycles/sec)", "float", 0.1, min=0.01, max=2.0),
+        Param("speed", "Speed (cycles/sec)", "float", 0.06, min=0.01, max=2.0),
         Param("saturation", "Saturation", "float", 1.0, min=0.0, max=1.0),
         Param("brightness", "Brightness", "float", 1.0, min=0.0, max=1.0),
     ]

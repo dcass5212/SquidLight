@@ -1,0 +1,18 @@
+OpenRGB
+=======
+
+SquidLight includes an unmodified copy of OpenRGB in its "openrgb" folder and runs it
+as a separate program. SquidLight does not link to or include any OpenRGB source code.
+
+OpenRGB is free software: you can redistribute it and/or modify it under the terms of
+the GNU General Public License version 2 (see OpenRGB-GPL-2.0.txt in this folder).
+OpenRGB is distributed WITHOUT ANY WARRANTY.
+
+Bundled version: see the OPENRGB_VERSION file in the "openrgb" folder.
+
+Source code for OpenRGB, including the version bundled here:
+    https://gitlab.com/CalcProgrammer1/OpenRGB
+Releases (source archives for each version):
+    https://gitlab.com/CalcProgrammer1/OpenRGB/-/releases
+Project site:
+    https://openrgb.org

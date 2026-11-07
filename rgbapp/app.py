@@ -13,10 +13,12 @@ from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
 from .engine.host import EngineHost
+from .model.app_settings import AppSettingsStore
 from .ui.engine_bridge import EngineBridge
 from .ui.main_window import MainWindow
-from .ui.theme import app_font, build_qss
-from .ui.tray import Tray
+from .ui.power import PowerEventFilter
+from .ui.theme import apply_accent, app_font, build_qss
+from .ui.tray import Tray, make_icon
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +28,13 @@ QUIT_TIMEOUT_MS = 25_000  # give up waiting for a stuck OpenRGB after this
 class App(QObject):
     stopped = Signal()
 
-    def __init__(self, qapp: QApplication, host: EngineHost, start_minimized: bool = False) -> None:
+    def __init__(
+        self,
+        qapp: QApplication,
+        host: EngineHost,
+        start_minimized: bool = False,
+        app_store: AppSettingsStore | None = None,
+    ) -> None:
         super().__init__()
         self.qapp = qapp
         self.host = host
@@ -34,12 +42,13 @@ class App(QObject):
         self._quitting = False
         self._hint_shown = False
 
+        self.bridge = EngineBridge(host, self, app_store)
+        apply_accent(self.bridge.app_settings.accent)  # before anything is styled or painted
         qapp.setApplicationName("SquidLight")
         qapp.setQuitOnLastWindowClosed(False)
         qapp.setFont(app_font())
         qapp.setStyleSheet(build_qss())
-
-        self.bridge = EngineBridge(host, self)
+        qapp.setWindowIcon(make_icon(True))
         self.window = MainWindow(self.bridge)
         self.tray = Tray(self.bridge, self)
         self.tray_available = Tray.available()
@@ -52,8 +61,15 @@ class App(QObject):
         # emitted from the engine-stop thread; queued so quit runs on the GUI thread
         self.stopped.connect(qapp.quit, Qt.QueuedConnection)
         qapp.aboutToQuit.connect(self._about_to_quit)
+        self.bridge.accent_changed.connect(self._apply_accent)
+
+        self.power = PowerEventFilter(self.bridge.reapply)
+        qapp.installNativeEventFilter(self.power)
 
     def start(self) -> None:
+        # A native handle even while hidden in the tray: Windows only tells top-level
+        # windows about resume from sleep.
+        self.window.winId()
         self.host.start()
         self.bridge.start()
         if self.tray_available:
@@ -73,7 +89,18 @@ class App(QObject):
         self.host.stop_async(done=self.stopped.emit)
         QTimer.singleShot(QUIT_TIMEOUT_MS, self.qapp.quit)
 
+    def _apply_accent(self, color: str) -> None:
+        apply_accent(color)
+        self.qapp.setStyleSheet(build_qss())
+        icon = make_icon(True)
+        self.qapp.setWindowIcon(icon)
+        self.window.setWindowIcon(icon)
+        self.tray.refresh_icons()
+        for w in self.qapp.allWidgets():
+            w.update()
+
     def _about_to_quit(self) -> None:
+        self.qapp.removeNativeEventFilter(self.power)
         self.bridge.stop()
         if not self._quitting:  # e.g. Windows is logging off: stop off-thread, wait briefly
             self._quitting = True

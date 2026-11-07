@@ -11,7 +11,7 @@ class RainbowWave(Effect):
     id = "rainbow_wave"
     name = "Rainbow Wave"
     params = [
-        Param("speed", "Speed (cycles/sec)", "float", 0.25, min=-3.0, max=3.0),
+        Param("speed", "Speed (cycles/sec)", "float", 0.14, min=-3.0, max=3.0),
         Param("wavelength", "Wavelength (device widths)", "float", 1.0, min=0.1, max=8.0),
         Param("angle", "Direction (degrees)", "float", 0.0, min=0.0, max=360.0),
         Param("saturation", "Saturation", "float", 1.0, min=0.0, max=1.0),

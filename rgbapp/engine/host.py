@@ -101,6 +101,8 @@ class EngineHost:
         self._save_timer: Optional[threading.Timer] = None
         self._resize_thread: Optional[threading.Thread] = None
         self._resize_pending: dict[tuple[str, str], int] = {}
+        self._restart_lock = threading.Lock()
+        self._restarting = False
         if store is not None:
             try:
                 self._master, self._settings = store.load()
@@ -158,6 +160,68 @@ class EngineHost:
         t = threading.Thread(target=work, name="engine-stop", daemon=True)
         t.start()
         return t
+
+    def restart(
+        self, reconfigure: Optional[Callable[[Engine], None]] = None, done: Optional[Callable[[], None]] = None
+    ) -> threading.Thread:
+        """Restart OpenRGB and the engine on a worker thread ("Restart OpenRGB" in Settings).
+
+        Stopping restores the devices and stops OpenRGB if we started it; ``reconfigure``
+        then runs while everything is down (e.g. ``engine.configure_server``), and the
+        engine starts again with the usual retries. A quit during a restart wins."""
+
+        def work() -> None:
+            try:
+                self._restart(reconfigure)
+            except Exception:
+                log.exception("restart failed")
+            finally:
+                if done is not None:
+                    done()
+
+        t = threading.Thread(target=work, name="engine-restart", daemon=True)
+        t.start()
+        return t
+
+    @property
+    def restarting(self) -> bool:
+        return self._restarting
+
+    def _restart(self, reconfigure: Optional[Callable[[Engine], None]]) -> None:
+        if not self._restart_lock.acquire(blocking=False):
+            log.info("restart already in progress")
+            return
+        try:
+            with self._lock:
+                if self._phase in ("stopping", "stopped"):
+                    return
+                log.info("restarting OpenRGB and the engine")
+                self._restarting = True
+                self._phase = "starting"  # UI changes are now only stored
+                self._generation += 1  # the pages drop their device views
+            self._stop_evt.set()
+            for t in (self._thread, self._resize_thread):
+                if t is not None and t is not threading.current_thread():
+                    t.join(30.0)
+            self._flush_save()
+            try:
+                self.engine.stop()
+            except Exception:
+                log.exception("engine.stop failed during restart")
+            if reconfigure is not None:
+                try:
+                    reconfigure(self.engine)
+                except Exception:
+                    log.exception("reconfigure failed during restart")
+            with self._lock:  # start under the lock, so a concurrent stop() sees the new thread
+                if self._phase in ("stopping", "stopped"):
+                    return
+                self._stop_evt.clear()
+                self._thread = None
+                self.start()
+        finally:
+            self._restarting = False
+            self._restart_lock.release()
 
     def _run_start(self) -> None:
         backoff = Backoff(first=self._retry_first, cap=15.0)
@@ -220,6 +284,10 @@ class EngineHost:
 
     def group_health(self, key: str) -> str:
         return self.engine.group_health(key) if self._phase == "running" else "disconnected"
+
+    def notices(self) -> dict:
+        """group key -> {layer id: why that layer isn't working} (no sensor source, ...)."""
+        return self.engine.notices() if self._phase == "running" else {}
 
     def settings(self, key: str) -> GroupSettings:
         with self._lock:
@@ -408,6 +476,22 @@ class EngineHost:
             self._touch_locked()
             if self._running():
                 self.engine.set_master_brightness(self._master)
+
+    # -- options from Settings
+
+    def reapply(self) -> None:
+        """Put the devices back in Direct mode and resend everything (resume from sleep)."""
+        with self._lock:
+            if self._running():
+                self.engine.reapply()
+
+    def set_write_cap(self, hz: Optional[float]) -> None:
+        with self._lock:
+            self.engine.set_write_cap(hz)
+
+    def set_input_options(self, audio_device: Optional[str], lhm_url: Optional[str]) -> None:
+        with self._lock:
+            self.engine.set_input_options(audio_device, lhm_url)
 
     def set_paused(self, paused: bool) -> None:
         with self._lock:

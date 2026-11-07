@@ -14,7 +14,7 @@ class GradientWave(Effect):
     name = "Gradient Wave"
     params = [
         Param("gradient", "Colors", "gradient", ((0.0, "#ff0066"), (0.5, "#7a00ff"), (1.0, "#00c8ff"))),
-        Param("speed", "Speed (waves/sec)", "float", 0.2, min=-3.0, max=3.0),
+        Param("speed", "Speed (waves/sec)", "float", 0.11, min=-3.0, max=3.0),
         Param("wavelength", "Wave size (device widths)", "float", 1.0, min=0.1, max=8.0),
         Param("angle", "Direction (degrees)", "float", 0.0, min=0.0, max=360.0),
         # mirrored, the gradient runs there and back so the wave has no hard seam

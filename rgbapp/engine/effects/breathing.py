@@ -12,7 +12,7 @@ class Breathing(Effect):
     name = "Breathing"
     params = [
         Param("color", "Color", "color", "#00aaff"),
-        Param("speed", "Speed (breaths/sec)", "float", 0.25, min=0.02, max=2.0),
+        Param("speed", "Speed (breaths/sec)", "float", 0.18, min=0.02, max=2.0),
         Param("min_level", "Dimmest level", "float", 0.0, min=0.0, max=1.0),
     ]
 

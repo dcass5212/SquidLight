@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -94,6 +95,9 @@ class DeviceCard(QFrame):
 
 
 class _EmptyState(QWidget):
+    restart_requested = Signal()
+    settings_requested = Signal()
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         col = QVBoxLayout(self)
@@ -108,27 +112,46 @@ class _EmptyState(QWidget):
         for w in (self.title, self.body):
             w.setAlignment(Qt.AlignHCenter)
             col.addWidget(w, 0, Qt.AlignHCenter)
+        actions = QHBoxLayout()
+        actions.setSpacing(T.unit)
+        actions.setAlignment(Qt.AlignHCenter)
+        self.restart_btn = QPushButton("Restart OpenRGB")
+        self.restart_btn.setObjectName("AccentButton")
+        self.restart_btn.clicked.connect(self.restart_requested)
+        self.settings_btn = QPushButton("Settings and log")
+        self.settings_btn.clicked.connect(self.settings_requested)
+        actions.addWidget(self.restart_btn)
+        actions.addWidget(self.settings_btn)
+        col.addSpacing(T.unit)
+        col.addLayout(actions)
         col.addStretch(1)
 
     def show_for(self, state: str, text: str) -> None:
+        waiting = state in ("starting", "stopping")
+        self.restart_btn.setVisible(not waiting)
+        self.settings_btn.setVisible(not waiting)
         if state == "failed":
             self.title.setText("Can't reach OpenRGB")
             self.body.setText(
-                f"{text}\n\nClose iCUE and Armoury Crate, and make sure OpenRGB can run as administrator."
+                f"{text}\n\nClose iCUE and Armoury Crate, then restart OpenRGB. "
+                "The log in Settings shows what went wrong."
             )
-        elif state in ("starting", "stopping"):
+        elif waiting:
             self.title.setText("Starting OpenRGB")
-            self.body.setText("Your devices appear here as soon as it connects. This can take a few seconds.")
+            self.body.setText(
+                f"{text}\n\nYour devices appear here as soon as it connects. This can take a few seconds."
+            )
         else:
             self.title.setText("No devices found")
             self.body.setText(
-                "OpenRGB is running but reported nothing it can control. Is OpenRGB running as administrator, "
-                "and are iCUE and Armoury Crate closed?"
+                "OpenRGB is running but reported nothing it can control. Close iCUE, Armoury Crate and "
+                "Windows Dynamic Lighting, make sure OpenRGB runs as administrator, then restart it."
             )
 
 
 class DashboardPage(QWidget):
     open_device = Signal(str)
+    open_settings = Signal()
 
     def __init__(self, bridge, parent=None) -> None:
         super().__init__(parent)
@@ -166,6 +189,8 @@ class DashboardPage(QWidget):
         col.addWidget(self.scroll, 1)
 
         self.empty = _EmptyState()
+        self.empty.restart_requested.connect(bridge.restart_openrgb)
+        self.empty.settings_requested.connect(self.open_settings)
         col.addWidget(self.empty, 1)
 
         bridge.groups_changed.connect(self.set_groups)

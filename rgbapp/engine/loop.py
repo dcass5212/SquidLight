@@ -20,6 +20,7 @@ from .backend import Backend, BackendError, ConnectionState
 from .compositor import Compositor, LayerSpec, to_uint8
 from .devices import DeviceGroup
 from .effects import Ctx
+from .inputs import InputHub
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +28,13 @@ log = logging.getLogger(__name__)
 # other SMBus users (docs/04). The keyboard may be raised to 60 once proven stable.
 DEFAULT_WRITE_HZ_BY_TYPE = {"keyboard": 30.0, "dram": 15.0, "motherboard": 15.0}
 FALLBACK_WRITE_HZ = 30.0
+# Choices for the user's write-rate cap (Settings). The keyboard (USB) writes at the cap;
+# everything else stays at its type default or the cap, whichever is lower.
+WRITE_CAP_CHOICES = (15, 20, 30, 60)
 _CAP_TOLERANCE_S = 0.002  # scheduler jitter allowance when checking the cap
+# A frame that starts this late means the PC was asleep (or badly stalled): devices may
+# have reset, so take Direct mode again and resend everything.
+STALL_REASSERT_S = 2.0
 
 
 @dataclass
@@ -35,15 +42,22 @@ class LoopConfig:
     fps: float = 30.0
     write_hz: dict[str, float] = field(default_factory=dict)  # by group key, overrides types
     device_retry_s: float = 3.0  # how long a device that failed a write sits out
+    max_write_hz: Optional[float] = None  # the user's cap (Settings); None keeps the defaults
 
     def write_hz_for(self, group: DeviceGroup) -> float:
         if group.key in self.write_hz:
             return self.write_hz[group.key]
+        cap = self.max_write_hz
+
+        def rate(device_type: str) -> float:
+            default = DEFAULT_WRITE_HZ_BY_TYPE.get(device_type, FALLBACK_WRITE_HZ)
+            if cap is None:
+                return default
+            # USB keyboards write at the cap; SMBus devices never go above their default
+            return cap if device_type == "keyboard" else min(default, cap)
+
         # a merged group is as slow as its slowest member
-        return min(
-            (DEFAULT_WRITE_HZ_BY_TYPE.get(t, FALLBACK_WRITE_HZ) for t in group.device_types),
-            default=FALLBACK_WRITE_HZ,
-        )
+        return min((rate(t) for t in group.device_types), default=cap or FALLBACK_WRITE_HZ)
 
 
 @dataclass
@@ -92,8 +106,10 @@ class RenderLoop:
         config: Optional[LoopConfig] = None,
         clock: Callable[[], float] = time.perf_counter,
         sleep: Callable[[float], None] = time.sleep,
+        inputs: Optional[InputHub] = None,
     ) -> None:
         self.backend = backend
+        self.inputs = inputs if inputs is not None else InputHub()
         self.config = config or LoopConfig()
         self.stats = LoopStats()
         self.master_brightness = 1.0
@@ -110,6 +126,9 @@ class RenderLoop:
         # because it means device I/O (restoring each device's own mode).
         self._want_paused = False
         self._paused = False
+        # Set from any thread; the render thread clears what was sent so the next frame is
+        # written in full ("reassert" first puts devices back in Direct mode).
+        self._resend: Optional[str] = None  # None | "resend" | "reassert"
 
     # -- control surface (safe to call from other threads)
 
@@ -129,6 +148,18 @@ class RenderLoop:
     def set_master_brightness(self, value: float) -> None:
         self.master_brightness = float(np.clip(value, 0.0, 1.0))
 
+    def set_write_cap(self, hz: Optional[float]) -> None:
+        """Change the user's write-rate cap; takes effect on the next frame."""
+        self.config.max_write_hz = hz
+        for rt in self._runtimes.values():
+            rt.min_interval = 1.0 / self.config.write_hz_for(rt.group)
+
+    def request_resend(self, reassert: bool = False) -> None:
+        """Write every device in full on the next frame (e.g. after resume from sleep).
+        ``reassert`` also puts each device back in Direct mode first."""
+        if reassert or self._resend is None:
+            self._resend = "reassert" if reassert else "resend"
+
     def pause(self) -> None:
         """Hand devices back to their own modes on the next frame, and stop writing."""
         self._want_paused = True
@@ -144,6 +175,11 @@ class RenderLoop:
     def latest_frames(self) -> dict[str, np.ndarray]:
         """The most recent uint8 output per group. The arrays are never mutated."""
         return {k: rt.last_frame for k, rt in self._runtimes.items() if rt.last_frame is not None}
+
+    def notices(self) -> dict[str, dict[str, str]]:
+        """group key -> {layer id: notice} for layers that can't work right now."""
+        found = {k: rt.compositor.notices() for k, rt in self._runtimes.items()}
+        return {k: v for k, v in found.items() if v}
 
     def group_health(self, group_key: str) -> str:
         """'paused', 'disconnected', 'error' (a device is sitting out) or 'ok'."""
@@ -172,6 +208,7 @@ class RenderLoop:
             thread.join(timeout)
             if thread.is_alive():
                 log.error("render thread did not stop within %.1fs", timeout)
+        self.inputs.shutdown()
 
     def run(self) -> None:
         """Blocking loop with absolute-deadline pacing (jitter doesn't accumulate)."""
@@ -194,6 +231,9 @@ class RenderLoop:
                 self.stats.late_frames += 1
                 if delay < -5 * period:  # long stall (sleep/resume): resync, don't burst
                     next_deadline = self._clock()
+                    if -delay >= STALL_REASSERT_S:
+                        log.info("render loop stalled %.1fs (sleep?); reapplying lighting", -delay)
+                        self.request_resend(reassert=True)
 
     def step(self, now: float) -> None:
         """Render and write one frame. Never raises."""
@@ -209,6 +249,7 @@ class RenderLoop:
             self._apply_pause(self._want_paused)
 
         if self._paused:
+            self.inputs.set_needs(set())  # nothing is lit, so nothing needs listening to
             for rt in self._runtimes.values():  # keep the preview alive; no device I/O
                 try:
                     self._step_group(rt, t, dt, now, connected=False)
@@ -227,11 +268,41 @@ class RenderLoop:
             log.exception("backend.maintain failed")
 
         connected = self.backend.state is ConnectionState.CONNECTED
+        if connected and self._resend is not None:
+            self._do_resend()
+            connected = self.backend.state is ConnectionState.CONNECTED  # reassert can drop it
+        inputs = self._read_inputs(now)
         for rt in self._runtimes.values():
             try:
-                self._step_group(rt, t, dt, now, connected)
+                self._step_group(rt, t, dt, now, connected, inputs)
             except Exception:
                 log.exception("group %s failed this frame", rt.group.key)
+
+    def _do_resend(self) -> None:
+        kind, self._resend = self._resend, None
+        if kind == "reassert":
+            reassert = getattr(self.backend, "reassert", None)
+            if reassert is not None:
+                try:
+                    reassert()
+                except Exception:
+                    log.exception("backend.reassert failed")
+        for rt in self._runtimes.values():
+            rt.last_sent.clear()
+            rt.retry_at.clear()
+
+    def _read_inputs(self, now: float) -> dict:
+        """Start/stop workers to match what the layers need, then take this frame's snapshot."""
+        try:
+            needs: set[str] = set()
+            for rt in self._runtimes.values():
+                if rt.enabled and rt.brightness * self.master_brightness > 0.0:
+                    needs |= rt.compositor.needs()
+            self.inputs.set_needs(needs)
+            return self.inputs.snapshot(now) if needs else {}
+        except Exception:
+            log.exception("reading inputs failed")
+            return {}
 
     def _apply_pause(self, pause: bool) -> None:
         if pause:
@@ -251,8 +322,13 @@ class RenderLoop:
                 rt.retry_at.clear()
         self._paused = pause
 
-    def _step_group(self, rt: _GroupRuntime, t: float, dt: float, now: float, connected: bool) -> None:
-        ctx = Ctx(t=t, dt=dt, led_positions=rt.group.positions)
+    def _step_group(
+        self, rt: _GroupRuntime, t: float, dt: float, now: float, connected: bool, inputs: Optional[dict] = None
+    ) -> None:
+        g = rt.group
+        ctx = Ctx(
+            t=t, dt=dt, led_positions=g.positions, inputs=inputs or {}, led_names=g.led_names, aspect=g.aspect
+        )
         level = rt.brightness * self.master_brightness if rt.enabled else 0.0
         frame = to_uint8(rt.compositor.render(ctx), level)
         rt.last_frame = frame

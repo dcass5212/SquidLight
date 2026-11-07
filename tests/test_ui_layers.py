@@ -230,11 +230,21 @@ def test_generated_editors_cover_every_effect_and_edit_live(running):
     assert app.bridge.layers("keyboard")[0].params["speed"] == pytest.approx(3.0)
     grad = panel.props.editors["gradient"]
     assert isinstance(grad, GradientEditor) and len(grad.swatches) == 3
-    grad.add_btn.click()
+    grad.add_btn.click()  # goes in the middle of the widest gap and becomes the selection
     stops = app.bridge.layers("keyboard")[0].params["gradient"]
-    assert [p for p, _ in stops] == pytest.approx([0, 1 / 3, 2 / 3, 1], abs=1e-3)
+    assert len(stops) == 4 and [p for p, _ in stops] == sorted(p for p, _ in stops)
     grad.swatches[0].color_changed.emit("#123456")
     assert app.bridge.layers("keyboard")[0].params["gradient"][0][1] == "#123456"
+    # select, move along the gradient, reorder, delete
+    grad.select(0)
+    grad.pos_slider.setValue(600)
+    assert grad.stops[1][0] == pytest.approx(0.6) and grad.selected == 1
+    assert grad.stops[1][1] == "#123456"  # the selection follows the color as it re-sorts
+    colors = grad.colors()
+    grad.later_btn.click()
+    assert grad.colors()[2] == colors[1] and grad.colors()[1] == colors[2] and grad.selected == 2
+    grad.remove_btn.click()
+    assert len(app.bridge.layers("keyboard")[0].params["gradient"]) == 3
     assert app.bridge.layers("keyboard")[0].id == lid
 
 
@@ -256,3 +266,16 @@ def test_memory_page_has_a_layers_panel_with_zone_masks(running):
     panel = page(app, "memory").layers
     choices = [panel.props.mask.itemData(i) for i in range(panel.props.mask.count())]
     assert choices == ["all", "Corsair DRAM", "Corsair DRAM (2)"]
+
+
+def test_layer_notice_is_shown_when_an_effect_cannot_work(running, qtbot):
+    app, _backend = running
+    pg = page(app, "keyboard")
+    lid = pg.layers.add("temperature_gradient")
+    pg.layers.select(lid)
+    app.host.engine.loop.step(app.host.engine.loop._clock())  # one frame: the effect reports in
+    app.bridge.poll_status()
+    assert pg.layers.props.notice.isVisibleTo(pg.layers.props)
+    assert pg.layers.props.notice.text()
+    pg.layers.select(pg.layers.order[-1])  # the base layer has nothing to report
+    assert not pg.layers.props.notice.isVisibleTo(pg.layers.props)

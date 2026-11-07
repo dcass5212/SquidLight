@@ -19,6 +19,7 @@ The final app ships its own copy of OpenRGB (see `01-product-and-decisions.md`).
 - `OpenRGBManager` (see `03-architecture.md`) starts and supervises the bundled `OpenRGB.exe`; the user never sees it.
 - The installer creates a scheduled task that runs the bundled OpenRGB at logon with highest privileges, so no UAC prompt appears each time. The app triggers that task rather than elevating itself.
 - OpenRGB's own settings and plugins live in its config folder; point it at an app-owned config dir (`--config`) so it doesn't touch a separate OpenRGB install the user may have.
+- As built (M8): the task is `\SquidLight\OpenRGB` (Task Scheduler > SquidLight). If it is deleted, or Settings changes the OpenRGB program or port, the app re-creates it after one UAC prompt. The installer does **not** ship the PawnIO driver that OpenRGB 1.0 uses for SMBus (RAM, board); it must already be installed (it is on this PC: `sc query PawnIO`).
 
 ## Expected device behavior (verify in milestone 0)
 | Device | Expectation | Risk |

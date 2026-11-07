@@ -271,7 +271,14 @@ class LayerProperties(QWidget):
         self._params_box = QVBoxLayout()
         self._params_box.setSpacing(T.unit * 1.5)
 
+        self.notice = QLabel()
+        self.notice.setObjectName("Caption")
+        self.notice.setWordWrap(True)
+        self.notice.setAccessibleName("Layer notice")
+        self.notice.hide()
+
         self.col.addLayout(self._field("Effect", self.effect))
+        self.col.addWidget(self.notice)
         self.col.addLayout(self._params_box)
         self.col.addLayout(self._field("Applies to", self.mask))
         self.col.addStretch(1)
@@ -308,6 +315,10 @@ class LayerProperties(QWidget):
             if editor is not None:
                 editor.set_value(spec.params.get(p.id, p.default))
         self._sync_mask(spec.mask)
+
+    def set_notice(self, text: str) -> None:
+        self.notice.setText(text)
+        self.notice.setVisible(bool(text))
 
     def _build_params(self, effect_id: str) -> None:
         while self._params_box.count():
@@ -425,6 +436,7 @@ class LayersPanel(QFrame):
         col.addWidget(self.props_scroll, 1)
 
         bridge.settings_changed.connect(self._on_settings_changed)
+        bridge.notices_changed.connect(lambda _n: self._show_notice())
         self.refresh()
 
     # -- reading the stack
@@ -483,6 +495,9 @@ class LayersPanel(QFrame):
         row.handle.installEventFilter(self)
         return row
 
+    def _show_notice(self) -> None:
+        self.props.set_notice(self.bridge.notice(self.key, self.selected) if self.selected else "")
+
     def _show_selection(self, by_id: dict) -> None:
         for lid, row in self.rows.items():
             row.set_selected(lid == self.selected)
@@ -491,6 +506,7 @@ class LayersPanel(QFrame):
         self.props_title.setText(f"{effect_name(spec.effect)} properties" if spec else "Properties")
         if spec is not None:
             self.props.show_layer(spec)
+        self._show_notice()
         self.selection_changed.emit(spec)
 
     # -- actions

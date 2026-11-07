@@ -3,16 +3,28 @@
 from __future__ import annotations
 
 from .base import Ctx, Effect, Param
+from .audio_pulse import AudioPulse
+from .audio_spectrum import AudioSpectrum
 from .breathing import Breathing
 from .color_cycle import ColorCycle
+from .cpu_gpu_meter import CpuGpuMeter
+from .fire import Fire
 from .gradient_wave import GradientWave
 from .rainbow_wave import RainbowWave
+from .raindrop import Raindrop
+from .reactive_typing import ReactiveTyping
+from .ripple import Ripple
 from .starlight import Starlight
 from .static import Static
 from .static_keys import StaticKeys
+from .temperature_gradient import TemperatureGradient
 
-# Library order (docs/02): simple to animated.
-_BUILTIN: list[type[Effect]] = [Static, Breathing, ColorCycle, RainbowWave, GradientWave, Starlight, StaticKeys]
+# Library order (docs/02): simple to animated, then the input-driven ones.
+_BUILTIN: list[type[Effect]] = [
+    Static, Breathing, ColorCycle, RainbowWave, GradientWave, Starlight, Fire, Raindrop,
+    ReactiveTyping, Ripple, AudioSpectrum, AudioPulse, CpuGpuMeter, TemperatureGradient,
+    StaticKeys,
+]
 
 EFFECTS: dict[str, type[Effect]] = {cls.id: cls for cls in _BUILTIN}
 

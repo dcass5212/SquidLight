@@ -65,6 +65,9 @@ class DeviceGroup:
         self.layout: Optional[DeviceLayout] = match_layout(self.led_names) if len(self.members) == 1 else None
         # Named LED sets from the layout ("Number pad", ...), usable in masks like zones.
         self.regions: dict[str, np.ndarray] = dict(self.layout.regions) if self.layout else {}
+        # Width / height of the key layout (positions are normalized per axis, so shape is lost).
+        w, h = self.layout.size if self.layout else (1.0, 1.0)
+        self.aspect: float = float(w / h) if h > 0 else 1.0
         self.positions: np.ndarray = _normalize(self.layout.centers()) if self.layout else self._positions()
 
     # -- frame <-> devices

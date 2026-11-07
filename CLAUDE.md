@@ -10,7 +10,7 @@ Read these before building, in order:
 5. `docs/05-roadmap.md`: milestones and acceptance criteria; build in this order
 
 ## Stack
-Python 3.11+, PySide6 (Qt 6), `openrgb-python`, numpy, psutil, sounddevice (WASAPI loopback). Package with PyInstaller later, not now.
+Python 3.11+, PySide6 (Qt 6), `openrgb-python`, numpy, psutil, soundcard (WASAPI loopback). Package with PyInstaller later, not now.
 
 OpenRGB is **bundled** and managed by our app (`OpenRGBManager`); the user never installs or opens it. It stays a separate, unmodified process (GPL): never import or link its code. In dev, put it in `vendor/openrgb/` and run it elevated.
 
@@ -27,3 +27,5 @@ OpenRGB is **bundled** and managed by our app (`OpenRGBManager`); the user never
 - Run app: `python -m rgbapp`
 - Run engine headless: `python -m rgbapp.engine --headless`
 - Tests: `pytest`
+- Build app folder + installer: `python packaging/build.py` (needs `pip install -e .[build]` and Inno Setup 6; `--no-installer` for just `dist/SquidLight/`)
+- Regenerate the exe icon: `python tools/make_icon.py`

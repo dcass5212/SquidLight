@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rgbapp"
-version = "0.0.1"
+version = "0.8.0"
 description = "Personal Synapse-style RGB lighting controller (OpenRGB SDK backend)"
 requires-python = ">=3.11"
 dependencies = [
@@ -16,8 +16,9 @@ dependencies = [
 [project.optional-dependencies]
 # Added when their milestones start (M2 and M7).
 gui = ["PySide6", "pytest-qt"]
-audio = ["sounddevice"]
+audio = ["soundcard"]  # WASAPI loopback (sounddevice has none)
 dev = ["pytest"]
+build = ["pyinstaller"]  # packaging only (M8); the installer also needs Inno Setup 6
 
 [tool.setuptools.packages.find]
 include = ["rgbapp*"]
