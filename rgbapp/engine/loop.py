@@ -85,6 +85,12 @@ class LoopStats:
         )
 
 
+def _ease(x: float) -> float:
+    """Smoothstep: fades start and end gently instead of with a visible corner."""
+    x = min(max(float(x), 0.0), 1.0)
+    return x * x * (3.0 - 2.0 * x)
+
+
 @dataclass
 class _GroupRuntime:
     group: DeviceGroup
@@ -93,6 +99,8 @@ class _GroupRuntime:
     brightness: float = 1.0
     enabled: bool = True  # False renders black (the dashboard's on/off toggle)
     last_frame: Optional[np.ndarray] = None  # latest uint8 output, for the UI preview
+    last_float: Optional[np.ndarray] = None  # latest composited float frame, before brightness
+    fade_from: Optional[np.ndarray] = None  # float frame a profile crossfade starts from
     last_sent: dict[str, np.ndarray] = field(default_factory=dict)  # device_id -> uint8 frame
     last_write: dict[str, float] = field(default_factory=dict)  # device_id -> clock time
     retry_at: dict[str, float] = field(default_factory=dict)  # device_id -> clock time
@@ -113,6 +121,12 @@ class RenderLoop:
         self.config = config or LoopConfig()
         self.stats = LoopStats()
         self.master_brightness = 1.0
+        # "Away" (locked, idle, scheduled off) fades every group to black and back. The level
+        # is 1 when lit and 0 when away; it moves toward the target by dt / fade_s per frame.
+        self.fade_s = 0.6
+        self._away = False
+        self._away_level = 1.0
+        self._xfade = 1.0  # profile crossfade progress, 0..1 (1 = finished)
         self._clock = clock
         self._sleep = sleep
         self._runtimes = {
@@ -147,6 +161,31 @@ class RenderLoop:
 
     def set_master_brightness(self, value: float) -> None:
         self.master_brightness = float(np.clip(value, 0.0, 1.0))
+
+    def set_fade(self, seconds: float) -> None:
+        self.fade_s = float(np.clip(seconds, 0.0, 5.0))
+
+    def set_away(self, away: bool, instant: bool = False) -> None:
+        """Fade everything to black (or back). Safe from any thread. ``instant`` jumps to the
+        end state with no fade (used when starting up already away)."""
+        self._away = bool(away)
+        if instant:
+            self._away_level = 0.0 if self._away else 1.0
+
+    @property
+    def away(self) -> bool:
+        return self._away
+
+    def begin_crossfade(self) -> None:
+        """Blend from what is lit now to whatever the layers render next (a profile switch)."""
+        if self.fade_s <= 0.0:
+            return
+        # Called off the render thread, so only replace values (never mutate in place), and set
+        # the progress last: the render thread then sees a fade_from to match any xfade < 1.
+        for rt in self._runtimes.values():
+            last = rt.last_float
+            rt.fade_from = None if last is None else last.copy()
+        self._xfade = 0.0
 
     def set_write_cap(self, hz: Optional[float]) -> None:
         """Change the user's write-rate cap; takes effect on the next frame."""
@@ -244,6 +283,7 @@ class RenderLoop:
         dt = max(t - self._last_t, 0.0)
         self._last_t = t
         self.stats.frames += 1
+        self._advance_fades(dt)
 
         if self._want_paused != self._paused:
             self._apply_pause(self._want_paused)
@@ -278,6 +318,20 @@ class RenderLoop:
             except Exception:
                 log.exception("group %s failed this frame", rt.group.key)
 
+    def _advance_fades(self, dt: float) -> None:
+        target = 0.0 if self._away else 1.0
+        if self.fade_s <= 0.0:
+            self._away_level = target
+            self._xfade = 1.0
+            return
+        step = dt / self.fade_s
+        if self._away_level < target:
+            self._away_level = min(target, self._away_level + step)
+        elif self._away_level > target:
+            self._away_level = max(target, self._away_level - step)
+        if self._xfade < 1.0:
+            self._xfade = min(1.0, self._xfade + step)
+
     def _do_resend(self) -> None:
         kind, self._resend = self._resend, None
         if kind == "reassert":
@@ -296,7 +350,7 @@ class RenderLoop:
         try:
             needs: set[str] = set()
             for rt in self._runtimes.values():
-                if rt.enabled and rt.brightness * self.master_brightness > 0.0:
+                if rt.enabled and rt.brightness * self.master_brightness > 0.0 and self._away_level > 0.0:
                     needs |= rt.compositor.needs()
             self.inputs.set_needs(needs)
             return self.inputs.snapshot(now) if needs else {}
@@ -330,7 +384,17 @@ class RenderLoop:
             t=t, dt=dt, led_positions=g.positions, inputs=inputs or {}, led_names=g.led_names, aspect=g.aspect
         )
         level = rt.brightness * self.master_brightness if rt.enabled else 0.0
-        frame = to_uint8(rt.compositor.render(ctx), level)
+        level *= _ease(self._away_level)
+        composed = rt.compositor.render(ctx)
+        xfade = self._xfade  # read once: begin_crossfade may reset it from another thread
+        fade_from = rt.fade_from
+        if xfade < 1.0 and fade_from is not None and fade_from.shape == composed.shape:
+            w = np.float32(_ease(xfade))
+            composed = fade_from * (1.0 - w) + composed * w
+        # What is actually lit, so a crossfade begun mid-fade starts from it, not from its target.
+        # (fade_from is never cleared here; it is ignored once the fade finishes.)
+        rt.last_float = composed
+        frame = to_uint8(composed, level)
         rt.last_frame = frame
         if not connected:
             return

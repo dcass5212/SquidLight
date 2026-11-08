@@ -44,6 +44,9 @@ class Engine:
         # Saved ARGB LED counts, {zone_key(device_id, zone name): count}, applied on every
         # connect (OpenRGB forgets them when it restarts).
         self.zone_sizes: dict[str, int] = {}
+        # Fade length and away state outlive a restart, like the input options.
+        self.fade_s = 0.6
+        self.away = False
 
     # -- lifecycle
 
@@ -68,6 +71,9 @@ class Engine:
             if not groups:
                 log.warning("OpenRGB reported no controllable devices with LEDs")
             self.loop = RenderLoop(self.backend, groups, self.config, inputs=self.inputs_factory())
+            self.loop.set_fade(self.fade_s)
+            # starting while away: begin dark, don't fade out from lit
+            self.loop.set_away(self.away, instant=self.away)
             if configure is not None:
                 configure(self)
             self.loop.start()
@@ -159,6 +165,20 @@ class Engine:
 
     def set_enabled(self, group_key: str, enabled: bool) -> None:
         self._require_loop().set_enabled(group_key, enabled)
+
+    def set_away(self, away: bool) -> None:
+        self.away = bool(away)
+        if self.loop is not None:
+            self.loop.set_away(self.away)
+
+    def set_fade(self, seconds: float) -> None:
+        self.fade_s = seconds
+        if self.loop is not None:
+            self.loop.set_fade(seconds)
+
+    def begin_crossfade(self) -> None:
+        if self.loop is not None:
+            self.loop.begin_crossfade()
 
     def pause(self) -> None:
         self._require_loop().pause()

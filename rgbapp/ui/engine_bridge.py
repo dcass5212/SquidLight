@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from datetime import datetime
 
 import numpy as np
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from ..engine.away import AwayPolicy, idle_seconds
 from ..engine.host import EngineHost, HostStatus
 from ..engine.rules import Rule, RulesWatcher
 from ..model.app_settings import AppSettings, AppSettingsStore, MemorySettingsStore
@@ -22,6 +24,7 @@ log = logging.getLogger(__name__)
 
 PREVIEW_INTERVAL_MS = 33  # about 30 Hz, matching the render loop
 STATUS_INTERVAL_MS = 250
+AWAY_INTERVAL_MS = 1000
 # After resume from sleep, USB devices come back over a few seconds: reapply more than once.
 REAPPLY_DELAYS_MS = (0, 3000, 8000)
 _ORDER = {"keyboard": 0, "memory": 1, "mainboard": 2, "case": 3}
@@ -45,6 +48,7 @@ class EngineBridge(QObject):
     dirty_changed = Signal(bool)  # the live lighting differs from the saved profile
     app_settings_changed = Signal(object)  # AppSettings
     accent_changed = Signal(str)
+    away_changed = Signal(list)  # why the lights are off: any of "locked", "idle", "schedule"; [] when on
     _rule_profile = Signal(str)  # from the rules thread; queued onto the GUI thread
 
     def __init__(
@@ -68,18 +72,27 @@ class EngineBridge(QObject):
         self._status_timer = QTimer(self)
         self._status_timer.setInterval(STATUS_INTERVAL_MS)
         self._status_timer.timeout.connect(self.poll_status)
+        self._locked = False
+        self._away_reasons: list[str] = []
+        self._away_timer = QTimer(self)
+        self._away_timer.setInterval(AWAY_INTERVAL_MS)
+        self._away_timer.timeout.connect(self.poll_away)
         self._preview_timer = QTimer(self)
         self._preview_timer.setInterval(PREVIEW_INTERVAL_MS)
         self._preview_timer.timeout.connect(self.poll_frames)
 
     def start(self) -> None:
+        self.host.set_fade_ms(self.app_settings.fade_ms)
         self._status_timer.start()
+        self._away_timer.start()
+        self.poll_away()
         self.poll_status()
         self._watcher.start()
 
     def stop(self) -> None:
         self._watcher.stop()
         self._status_timer.stop()
+        self._away_timer.stop()
         self._preview_timer.stop()
 
     def set_preview_active(self, active: bool) -> None:
@@ -114,6 +127,29 @@ class EngineBridge(QObject):
         if notices != self._notices:
             self._notices = notices
             self.notices_changed.emit(notices)
+
+    # -- away: lock, idle and schedule turn the lights off with a fade
+
+    @property
+    def away_reasons(self) -> list[str]:
+        return list(self._away_reasons)
+
+    def set_session_locked(self, locked: bool) -> None:
+        self._locked = bool(locked)
+        self.poll_away()
+
+    def poll_away(self) -> None:
+        s = self.app_settings
+        policy = AwayPolicy(
+            s.off_on_lock, s.idle_enabled, s.idle_minutes, s.schedule_enabled, s.schedule_off, s.schedule_on
+        )
+        idle = idle_seconds() if s.idle_enabled else 0.0
+        reasons = policy.reasons(datetime.now().time(), idle, self._locked)
+        if reasons != self._away_reasons:
+            self._away_reasons = reasons
+            log.info("lights %s", f"off ({', '.join(reasons)})" if reasons else "on")
+            self.host.set_away(bool(reasons))
+            self.away_changed.emit(list(reasons))
 
     def notice(self, key: str, layer_id: str) -> str:
         return self._notices.get(key, {}).get(layer_id, "")
@@ -297,6 +333,9 @@ class EngineBridge(QObject):
             self.host.set_write_cap(new.write_cap_hz)
         if (new.audio_device, new.lhm_url) != (old.audio_device, old.lhm_url):
             self.host.set_input_options(new.audio_device, new.lhm_url)
+        if new.fade_ms != old.fade_ms:
+            self.host.set_fade_ms(new.fade_ms)
+        self.poll_away()
         if new.accent != old.accent:
             self.accent_changed.emit(new.accent)
         self.app_settings_changed.emit(new)

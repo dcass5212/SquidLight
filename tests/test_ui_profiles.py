@@ -45,7 +45,7 @@ def answer(monkeypatch, label):
 
 def test_header_shows_unsaved_state_with_save_and_revert(app):
     w = app.window
-    assert w.profile.currentText() == "Default"
+    assert w.sidebar.profile_button(app.bridge.profiles.active_id).active
     assert not w.save_btn.isVisibleTo(w) and not w.unsaved.isVisibleTo(w)
     edit(app)
     assert w.unsaved.isVisibleTo(w) and w.save_btn.isVisibleTo(w) and w.revert_btn.isVisibleTo(w)
@@ -70,7 +70,7 @@ def test_switching_with_unsaved_changes_asks_first(app, monkeypatch):
 
     answer(monkeypatch, "Discard")
     assert profiles_page.switch_profile(app.bridge, default, w)
-    assert app.bridge.profiles.active_id == default and w.profile.currentData() == default
+    assert app.bridge.profiles.active_id == default and w.sidebar.profile_button(default).active
     assert app.bridge.settings("keyboard").effect == "rainbow_wave"
 
     app.bridge.activate_profile(other)
@@ -97,7 +97,7 @@ def test_the_rules_thread_switches_through_the_gui_thread(app, qtbot):
     app.bridge.activate_profile(app.bridge.profiles.default_id)
     app.bridge._rule_profile.emit(gaming)  # what the watcher thread does
     qtbot.waitUntil(lambda: app.bridge.profiles.active_id == gaming, timeout=2000)
-    assert app.window.profile.currentData() == gaming
+    assert app.window.sidebar.profile_button(gaming).active
     app.bridge._rule_profile.emit("gone")  # a deleted profile is ignored
     assert app.bridge.profiles.active_id == gaming
 
@@ -181,3 +181,18 @@ def test_tray_profile_submenu_follows_and_switches(app, monkeypatch):
     app.bridge.save_profile()
     tray.profile_actions[app.bridge.profiles.default_id].trigger()  # clean: no prompt
     assert app.bridge.profiles.active_id == app.bridge.profiles.default_id
+
+
+def test_sidebar_lists_profiles_and_clicking_one_switches(app, monkeypatch):
+    other = app.bridge.create_profile("Other")
+    default = app.bridge.profiles.default_id
+    sb = app.window.sidebar
+    assert sb.profile_button(other).active and not sb.profile_button(default).active
+    sb.profile_button(default).click()
+    assert app.bridge.profiles.active_id == default
+    assert sb.profile_button(default).active and not sb.profile_button(other).active
+
+    edit(app)  # unsaved on Default; cancelling keeps it active
+    answer(monkeypatch, "Cancel")
+    sb.profile_button(other).click()
+    assert app.bridge.profiles.active_id == default and sb.profile_button(default).active

@@ -193,6 +193,73 @@ def test_blend_modes(groups):
         np.testing.assert_allclose(out[0], expected, atol=1e-6, err_msg=mode)
 
 
+def test_more_blend_modes(groups):
+    g = groups["memory"]
+    base = LayerSpec("static", {"color": "#808000"})  # (128, 128, 0)
+    half = 128 / 255
+    cases = {  # top = #ff0000 (1, 0, 0)
+        "subtract": [max(half - 1.0, 0.0), half, 0.0],
+        "darken": [half, 0.0, 0.0],
+        "lighten": [1.0, half, 0.0],
+        "difference": [1.0 - half, half, 0.0],
+        "overlay": [1 - 2 * (1 - half) * 0.0, 2 * half * 0.0 if half < 0.5 else 1 - 2 * (1 - half) * 1.0, 0.0],
+        "dodge": [1.0, half, 0.0],  # dst/(1-src): red channel src=1 -> white; green src=0 -> unchanged
+    }
+    for mode, expected in cases.items():
+        out = comp_with(g, base, LayerSpec("static", {"color": "#ff0000"}, blend=mode)).render(ctx_for(g))
+        np.testing.assert_allclose(out[0], expected, atol=1e-5, err_msg=mode)
+
+
+def test_dodge_never_produces_nan_or_inf(groups):
+    g = groups["memory"]
+    for below in ("#000000", "#ffffff", "#808080"):
+        out = comp_with(
+            g, LayerSpec("static", {"color": below}), LayerSpec("static", {"color": "#ffffff"}, blend="dodge")
+        ).render(ctx_for(g))
+        assert np.isfinite(out).all() and out.min() >= 0.0 and out.max() <= 1.0
+
+
+def test_every_mode_has_a_label_and_stays_in_range(groups):
+    from rgbapp.engine.compositor import BLEND_INFO, BLEND_MODES
+
+    assert list(BLEND_INFO) == list(BLEND_MODES)
+    g = groups["memory"]
+    for mode in BLEND_MODES:
+        out = comp_with(
+            g, LayerSpec("static", {"color": "#336699"}), LayerSpec("static", {"color": "#cc9933"}, blend=mode)
+        ).render(ctx_for(g))
+        assert np.isfinite(out).all() and out.min() >= 0.0 and out.max() <= 1.0, mode
+
+
+def test_a_blend_layer_with_nothing_below_lands_as_normal(groups):
+    g = groups["memory"]
+    for mode in ("multiply", "darken", "difference", "subtract", "overlay"):
+        out = comp_with(g, LayerSpec("static", {"color": "#00ff00"}, blend=mode)).render(ctx_for(g))
+        np.testing.assert_allclose(out[0], [0, 1, 0], atol=1e-6, err_msg=mode)
+
+
+def test_opacity_over_nothing_is_a_fraction_of_the_layer_and_leaves_room_below(groups):
+    g = groups["memory"]
+    out = comp_with(g, LayerSpec("static", {"color": "#ffffff"}, opacity=0.5, blend="multiply")).render(ctx_for(g))
+    np.testing.assert_allclose(out[0], [0.5, 0.5, 0.5], atol=1e-6)
+    # a second multiply layer only half-sees the first: 0.5 below, so it blends at 50%
+    two = comp_with(
+        g,
+        LayerSpec("static", {"color": "#ffffff"}, opacity=0.5),
+        LayerSpec("static", {"color": "#000000"}, blend="multiply"),
+    ).render(ctx_for(g))
+    np.testing.assert_allclose(two[0], [0.0, 0.0, 0.0], atol=1e-6)  # black x anything is black
+
+
+def test_painted_gaps_are_not_blended_against_black(groups):
+    g = groups["keyboard"]
+    paint = LayerSpec("static_keys", {"colors": {"0": "#ffffff"}})
+    top = LayerSpec("static", {"color": "#00ff00"}, blend="multiply")
+    out = comp_with(g, paint, top).render(ctx_for(g))
+    np.testing.assert_allclose(out[0], [0, 1, 0], atol=1e-6)  # painted key: white x green
+    np.testing.assert_allclose(out[1], [0, 1, 0], atol=1e-6)  # unpainted key: green, not black
+
+
 def test_invisible_and_zero_opacity_layers_are_skipped(groups):
     g = groups["memory"]
     out = comp_with(

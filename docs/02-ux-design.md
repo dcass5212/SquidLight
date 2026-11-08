@@ -5,7 +5,7 @@ Model it on Razer Synapse: device-first navigation, one big visual, simple panel
 ## Window layout (min 1100x700)
 ```
 +-----------+--------------------------------------------+----------------+
-| Sidebar   |  Header: device name | profile dropdown    | Right panel    |
+| Sidebar   |  Title bar: title | status | Save/Revert     | Right panel    |
 |           |--------------------------------------------|                |
 | Dashboard |                                            | Layers /       |
 | Keyboard  |        Device visual (canvas)              | Effect         |
@@ -17,7 +17,7 @@ Model it on Razer Synapse: device-first navigation, one big visual, simple panel
 | Settings  |                                            |                |
 +-----------+--------------------------------------------+----------------+
 ```
-- Sidebar shows one entry per detected device group, with a status dot (connected, disconnected, error). Settings and Profiles are pinned at the bottom.
+- Sidebar shows one entry per detected device group, with a status dot (connected, disconnected, error). A Profiles list sits under Devices: one entry per profile, the active one marked with an accent dot; click to switch (asks first if there are unsaved changes). Manage profiles and Settings are pinned at the bottom.
 - The canvas is a live preview and reflects the engine's actual output.
 - The right panel changes with context: layer stack plus properties for the selected layer.
 
@@ -49,7 +49,8 @@ Card per device group: name, status, current effect, brightness slider, and an o
 - A "Sync with keyboard" toggle mirrors the keyboard's dominant effect onto these devices.
 
 ### Layers panel (shared)
-- Ordered list, top layer composited over lower ones. Each row has a visibility eye, name, blend mode (Normal, Add, Multiply), opacity, a drag handle and a delete button.
+- Ordered list, top layer composited over lower ones. Each row has a visibility eye, name, blend mode, opacity, a drag handle and a delete button.
+- Blend modes, in dropdown order with a separator between families: Normal | Add, Subtract | Multiply, Screen, Overlay | Darken, Lighten | Difference, Color dodge. Each item has a one-line tooltip.
 - "+ Add effect" opens the effect library (a grid of effect cards with a small animated preview).
 - Selecting a layer shows its parameters: colors (1 to N gradient stops), speed, direction, size, and the key/zone mask it applies to.
 

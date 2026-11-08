@@ -180,8 +180,12 @@ QToolTip {{
 #Brand {{ background: transparent; border-bottom: 1px solid {t.border}; }}
 #Wordmark {{ font-family: {display}; font-size: 17px; font-weight: 600; }}
 #SidebarSection {{ color: {t.muted}; font-size: {t.caption}px; padding: 0 {t.unit * 2}px; }}
-#Header {{ background: {t.bg}; border-bottom: 1px solid {t.border}; }}
-#StatusChip {{ background: transparent; border: 1px solid transparent; border-radius: {ctl // 2}px; }}
+#TitleBar {{ background: {t.panel}; border-bottom: 1px solid {t.border}; }}
+#TitleBar QLabel {{ background: transparent; }}
+#TitleBar #PageTitle {{ font-size: 16px; }}
+#TitleBar QPushButton {{ min-height: 26px; max-height: 26px; padding: 0 12px; }}
+#TitleRule {{ background: {t.border}; }}
+#StatusChip {{ background: transparent; border: 1px solid transparent; border-radius: 13px; }}
 #StatusChip[problem="true"] {{ background: {t.raised}; border-color: {t.track}; }}
 #StatusChip QLabel {{ color: {t.muted}; font-size: {t.label}px; }}
 #StatusChip[problem="true"] QLabel {{ color: {t.text}; }}
@@ -265,15 +269,15 @@ QComboBox QAbstractItemView {{
     background: {t.raised}; border: 1px solid {t.track}; outline: 0; padding: 4px;
     selection-background-color: {t.hover}; selection-color: {t.text};
 }}
-QLineEdit, QSpinBox {{
+QLineEdit, QSpinBox, QTimeEdit {{
     background: {t.raised}; border: 1px solid {t.border}; border-radius: {t.radius}px;
     padding: 0 8px; min-height: {ctl}px; selection-background-color: {accent_soft};
 }}
-QLineEdit:hover, QSpinBox:hover {{ border-color: {t.track}; }}
-QLineEdit:focus, QSpinBox:focus {{ border-color: {t.accent}; }}
-QLineEdit:disabled, QSpinBox:disabled {{ color: {t.muted}; background: {t.panel}; }}
-QSpinBox::up-button, QSpinBox::down-button {{ width: 0; border: none; }}
-QSpinBox {{ padding-right: 8px; }}
+QLineEdit:hover, QSpinBox:hover, QTimeEdit:hover {{ border-color: {t.track}; }}
+QLineEdit:focus, QSpinBox:focus, QTimeEdit:focus {{ border-color: {t.accent}; }}
+QLineEdit:disabled, QSpinBox:disabled, QTimeEdit:disabled {{ color: {t.muted}; background: {t.panel}; }}
+QSpinBox::up-button, QSpinBox::down-button, QTimeEdit::up-button, QTimeEdit::down-button {{ width: 0; border: none; }}
+QSpinBox, QTimeEdit {{ padding-right: 8px; }}
 
 QCheckBox {{ spacing: 8px; }}
 QCheckBox::indicator {{

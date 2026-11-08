@@ -5,8 +5,10 @@ from __future__ import annotations
 from .base import Ctx, Effect, Param
 from .audio_pulse import AudioPulse
 from .audio_spectrum import AudioSpectrum
+from .aurora import Aurora
 from .breathing import Breathing
 from .color_cycle import ColorCycle
+from .comet import Comet
 from .cpu_gpu_meter import CpuGpuMeter
 from .fire import Fire
 from .gradient_wave import GradientWave
@@ -21,7 +23,7 @@ from .temperature_gradient import TemperatureGradient
 
 # Library order (docs/02): simple to animated, then the input-driven ones.
 _BUILTIN: list[type[Effect]] = [
-    Static, Breathing, ColorCycle, RainbowWave, GradientWave, Starlight, Fire, Raindrop,
+    Static, Breathing, ColorCycle, RainbowWave, GradientWave, Aurora, Comet, Starlight, Fire, Raindrop,
     ReactiveTyping, Ripple, AudioSpectrum, AudioPulse, CpuGpuMeter, TemperatureGradient,
     StaticKeys,
 ]

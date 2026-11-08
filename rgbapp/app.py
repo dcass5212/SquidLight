@@ -16,7 +16,7 @@ from .engine.host import EngineHost
 from .model.app_settings import AppSettingsStore
 from .ui.engine_bridge import EngineBridge
 from .ui.main_window import MainWindow
-from .ui.power import PowerEventFilter
+from .ui.power import PowerEventFilter, register_session_notifications, session_is_locked
 from .ui.theme import apply_accent, app_font, build_qss
 from .ui.tray import Tray, make_icon
 
@@ -63,19 +63,22 @@ class App(QObject):
         qapp.aboutToQuit.connect(self._about_to_quit)
         self.bridge.accent_changed.connect(self._apply_accent)
 
-        self.power = PowerEventFilter(self.bridge.reapply)
+        self.power = PowerEventFilter(self.bridge.reapply, on_lock_changed=self.bridge.set_session_locked)
         qapp.installNativeEventFilter(self.power)
 
     def start(self) -> None:
         # A native handle even while hidden in the tray: Windows only tells top-level
         # windows about resume from sleep.
-        self.window.winId()
+        hwnd = int(self.window.winId())
+        register_session_notifications(hwnd)
         self.host.start()
         self.bridge.start()
+        if session_is_locked():  # started (e.g. at logon) into an already-locked session
+            self.bridge.set_session_locked(True)
         if self.tray_available:
             self.tray.show()
         if not self.start_minimized or not self.tray_available:
-            self.window.show()
+            self.window.show_initial()
 
     def quit(self) -> None:
         if self._quitting:
@@ -95,6 +98,7 @@ class App(QObject):
         icon = make_icon(True)
         self.qapp.setWindowIcon(icon)
         self.window.setWindowIcon(icon)
+        self.window.titlebar.refresh_icon()
         self.tray.refresh_icons()
         for w in self.qapp.allWidgets():
             w.update()

@@ -1,5 +1,6 @@
 """App settings (``settings.json``): OpenRGB path and port, write-rate cap, accent color,
-audio device, hardware-monitor URL, start minimized.
+audio device, hardware-monitor URL, start minimized, fade length, and when to turn the
+lights off (lock, idle, nightly schedule).
 
 "Start with Windows" is not stored here: the Run key in the registry is the truth
 (``rgbapp.system.autostart``), so the installer and the app can't disagree.
@@ -17,6 +18,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Optional
 
+from ..engine.away import parse_clock
 from ..engine.inputs.stats import LHM_URL
 from ..engine.loop import WRITE_CAP_CHOICES
 from ..paths import data_dir
@@ -40,6 +42,13 @@ class AppSettings:
     accent: str = DEFAULT_ACCENT
     audio_device: str = ""  # empty: follow the Windows default output
     lhm_url: str = LHM_URL
+    fade_ms: int = 600  # fade out/in when the lights go away and when a profile changes; 0 = instant
+    off_on_lock: bool = True
+    idle_enabled: bool = False
+    idle_minutes: int = 10
+    schedule_enabled: bool = False
+    schedule_off: str = "23:00"
+    schedule_on: str = "07:00"
 
     def normalized(self) -> "AppSettings":
         """A copy with every value in range (bad values fall back to the default)."""
@@ -54,7 +63,21 @@ class AppSettings:
             accent=self.accent.lower() if isinstance(self.accent, str) and _HEX.match(self.accent) else d.accent,
             audio_device=str(self.audio_device or ""),
             lhm_url=str(self.lhm_url or "").strip() or d.lhm_url,
+            fade_ms=min(max(_int(self.fade_ms, d.fade_ms), 0), 3000),
+            off_on_lock=bool(self.off_on_lock),
+            idle_enabled=bool(self.idle_enabled),
+            idle_minutes=min(max(_int(self.idle_minutes, d.idle_minutes), 1), 240),
+            schedule_enabled=bool(self.schedule_enabled),
+            schedule_off=_clock(self.schedule_off, d.schedule_off),
+            schedule_on=_clock(self.schedule_on, d.schedule_on),
         )
+
+
+def _clock(value, default: str) -> str:
+    if not isinstance(value, str):
+        return default
+    t = parse_clock(value, parse_clock(default))
+    return f"{t.hour:02d}:{t.minute:02d}"
 
 
 def _int(value, default: int) -> int:

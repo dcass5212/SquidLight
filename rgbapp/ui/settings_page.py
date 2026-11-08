@@ -12,7 +12,7 @@ import logging
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Callable
 
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import QTime, Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSpinBox,
+    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -191,6 +192,7 @@ class SettingsPage(QWidget):
 
         col.addWidget(self._build_openrgb())
         col.addWidget(self._build_startup())
+        col.addWidget(self._build_away())
         col.addWidget(self._build_appearance())
         col.addWidget(self._build_performance())
         col.addWidget(self._build_inputs())
@@ -353,6 +355,86 @@ class SettingsPage(QWidget):
                 autostart.enable(on)  # the Run entry carries --minimized
             except OSError as exc:
                 log.warning("could not update the autostart entry: %s", exc)
+
+    # -- lights off: lock, idle, schedule
+
+    def _build_away(self) -> QFrame:
+        a = self.bridge.app_settings
+        box, col = _card(
+            "Turn lights off",
+            "The lights fade out when any of these apply and fade back in when none do. "
+            "Pausing from the tray still works on top of this.",
+        )
+        self.off_on_lock = Toggle()
+        self.off_on_lock.setChecked(a.off_on_lock)
+        self.off_on_lock.toggled.connect(lambda on: self._set(off_on_lock=on))
+        col.addLayout(_row("When the screen is locked", "Back on as soon as you unlock.", self.off_on_lock))
+        col.addWidget(_rule())
+
+        self.idle_on = Toggle()
+        self.idle_on.setChecked(a.idle_enabled)
+        self.idle_on.toggled.connect(self._toggle_idle)
+        self.idle_minutes = QSpinBox()
+        self.idle_minutes.setRange(1, 240)
+        self.idle_minutes.setSuffix(" min")
+        self.idle_minutes.setValue(a.idle_minutes)
+        self.idle_minutes.setEnabled(a.idle_enabled)
+        self.idle_minutes.setAccessibleName("Minutes without input before the lights turn off")
+        self.idle_minutes.valueChanged.connect(lambda v: self._set(idle_minutes=v))
+        guard_wheel(self.idle_minutes)
+        idle_ctl = QHBoxLayout()
+        idle_ctl.setSpacing(T.unit * 1.5)
+        idle_ctl.addWidget(self.idle_minutes)
+        idle_ctl.addWidget(self.idle_on)
+        col.addLayout(
+            _row("When I'm away from the keyboard", "No keyboard or mouse input for this long. Any input brings them back.", idle_ctl)
+        )
+        col.addWidget(_rule())
+
+        self.sched_on = Toggle()
+        self.sched_on.setChecked(a.schedule_enabled)
+        self.sched_on.toggled.connect(self._toggle_schedule)
+        self.sched_off_time = self._time_edit(a.schedule_off, "Lights turn off at", "schedule_off")
+        self.sched_on_time = self._time_edit(a.schedule_on, "Lights turn on at", "schedule_on")
+        for w in (self.sched_off_time, self.sched_on_time):
+            w.setEnabled(a.schedule_enabled)
+        sched_ctl = QHBoxLayout()
+        sched_ctl.setSpacing(T.unit * 1.5)
+        sched_ctl.addWidget(self.sched_off_time)
+        sched_ctl.addWidget(QLabel("to"))
+        sched_ctl.addWidget(self.sched_on_time)
+        sched_ctl.addWidget(self.sched_on)
+        col.addLayout(_row("On a schedule", "Off from the first time until the second, every day.", sched_ctl))
+        col.addWidget(_rule())
+
+        self.fade = QComboBox()
+        for ms, label in ((0, "Instant"), (300, "Quick (0.3 s)"), (600, "Smooth (0.6 s)"), (1500, "Slow (1.5 s)"), (3000, "Very slow (3 s)")):
+            self.fade.addItem(label, ms)
+        idx = self.fade.findData(a.fade_ms)
+        if idx < 0:
+            self.fade.addItem(f"{a.fade_ms / 1000:g} s", a.fade_ms)
+            idx = self.fade.count() - 1
+        self.fade.setCurrentIndex(idx)
+        self.fade.currentIndexChanged.connect(lambda _i: self._set(fade_ms=self.fade.currentData()))
+        guard_wheel(self.fade)
+        col.addLayout(_row("Fade length", "Also used to blend between profiles instead of cutting.", self.fade))
+        return box
+
+    def _time_edit(self, value: str, name: str, key: str) -> QTimeEdit:
+        edit = QTimeEdit(QTime.fromString(value, "HH:mm"))
+        edit.setDisplayFormat("HH:mm")
+        edit.setAccessibleName(name)
+        edit.timeChanged.connect(lambda t: self._set(**{key: t.toString("HH:mm")}))
+        return edit
+
+    def _toggle_idle(self, on: bool) -> None:
+        self.idle_minutes.setEnabled(on)
+        self._set(idle_enabled=on)
+
+    def _toggle_schedule(self, on: bool) -> None:
+        self.sched_off_time.setEnabled(on)
+        self.sched_on_time.setEnabled(on)
+        self._set(schedule_enabled=on)
 
     # -- appearance
 

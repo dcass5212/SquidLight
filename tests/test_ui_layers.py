@@ -147,6 +147,20 @@ def test_three_layer_stack_edits_live_on_the_hardware(running, qtbot):
     assert controls.layers_note.text() == "+ 2 more layers on top"
 
 
+def test_blend_dropdown_lists_every_mode_with_a_hint(running):
+    from rgbapp.engine.compositor import BLEND_INFO, BLEND_MODES
+    from PySide6.QtCore import Qt
+
+    app, _backend = running
+    panel = page(app, "keyboard").layers
+    combo = panel.rows[panel.order[0]].blend
+    items = [(combo.itemData(i), combo.itemText(i)) for i in range(combo.count()) if combo.itemData(i)]
+    assert [m for m, _ in items] == list(BLEND_MODES)
+    assert dict(items)["dodge"] == "Color dodge"
+    i = combo.findData("multiply")
+    assert combo.itemData(i, Qt.ToolTipRole) == BLEND_INFO["multiply"][1]
+
+
 def test_mask_choice_limits_a_layer_and_is_outlined_on_the_canvas(running, qtbot):
     app, backend = running
     p = page(app, "keyboard")

@@ -205,7 +205,7 @@ def test_host_layer_effect_switch_remembers_params_and_validates():
     host.set_layer_effect("keyboard", lid, "breathing")
     assert host.layers("keyboard")[-1].params == {"color": "#abcdef"}
     with pytest.raises(ValueError):
-        host.set_layer_props("keyboard", lid, blend="dodge")
+        host.set_layer_props("keyboard", lid, blend="not-a-mode")
     with pytest.raises(KeyError):
         host.set_layer_effect("keyboard", lid, "nope")
     with pytest.raises(KeyError):

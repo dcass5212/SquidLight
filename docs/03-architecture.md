@@ -62,7 +62,7 @@ States exposed to the UI: `starting`, `running`, `external`, `failed(reason)`. E
 ## Rendering model
 - Each device group has a frame buffer `float32 (n_leds, 3)` in 0..1.
 - A profile has, per device group, an ordered list of layers. Each layer = `effect_id`, `params`, `mask` (LED indices or zone names, or all), `blend`, `opacity`, `visible`.
-- Each frame: for each visible layer from bottom to top, `effect.render(ctx) -> (n_leds, 3)`, then composite using the blend mode and opacity inside the mask. Then apply the device brightness and master brightness, convert to uint8, and hand to the writer.
+- Each frame: for each visible layer from bottom to top, `effect.render(ctx) -> (n_leds, 3)`, then composite using the blend mode and opacity inside the mask. The compositor also tracks how much of each LED the layers so far have drawn (`acc`, 0..1); a non-Normal blend mixes toward Normal where `acc` is low, so a Multiply layer over an LED nothing else lit shows its own color instead of black. Unknown blend names load as Normal. Then apply the device brightness and master brightness, convert to uint8, and hand to the writer.
 - `ctx` contains: `t` (seconds), `dt`, `led_positions` (normalized x,y per LED), `inputs` (audio bands, key states, cpu/gpu/temps).
 - Effects are pure functions of `ctx` plus their own small state, so they are easy to test.
 - Skip a device write when the frame is unchanged (an important optimization for static layers).

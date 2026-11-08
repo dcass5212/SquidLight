@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..engine.compositor import BLEND_MODES, LayerSpec
+from ..engine.compositor import BLEND_INFO, BLEND_MODES, LayerSpec
 from ..engine.devices import DeviceGroup
 from ..engine.effects import get_effect_class, listed_effects
 from .effect_library import EffectLibrary
@@ -35,6 +35,9 @@ from .theme import T, qcolor
 from .widgets import PercentSlider, guard_wheel, keyboard_focused, track_focus_reason
 
 PANEL_WIDTH = 340
+# Dropdown families: Normal | Add, Subtract | Multiply, Screen, Overlay | Darken, Lighten | Difference, Color dodge.
+# A separator follows each mode listed here.
+BLEND_GROUP_ENDS = {"normal", "subtract", "overlay", "lighten"}
 LIST_MAX_HEIGHT = 280  # about four rows; more scroll
 
 
@@ -153,7 +156,11 @@ class LayerRow(QFrame):
         self.blend.setToolTip("How this layer mixes with the layers below it")
         self.blend.setFocusPolicy(Qt.StrongFocus)
         for mode in BLEND_MODES:
-            self.blend.addItem(mode.capitalize(), mode)
+            label, hint = BLEND_INFO[mode]
+            self.blend.addItem(label, mode)
+            self.blend.setItemData(self.blend.count() - 1, hint, Qt.ToolTipRole)
+            if mode in BLEND_GROUP_ENDS:  # a rule between families of modes
+                self.blend.insertSeparator(self.blend.count())
         self.blend.setMinimumWidth(104)
         self.opacity = PercentSlider("Layer opacity")
         self.opacity.setToolTip("Layer opacity")

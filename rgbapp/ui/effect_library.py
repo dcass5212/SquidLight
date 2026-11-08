@@ -21,13 +21,15 @@ from .widgets import keyboard_focused, track_focus_reason
 
 PREVIEW_COLS, PREVIEW_ROWS = 16, 5
 PREVIEW_INTERVAL_MS = 40
-COLUMNS = 5  # three rows: the dialog fits a 1080p screen at 125% scaling
+COLUMNS = 6  # three rows: the dialog fits a 1080p screen at 125% scaling
 _DESCRIPTIONS = {
     "static": "One solid color.",
     "breathing": "A color that fades in and out.",
     "color_cycle": "Everything fades through the spectrum together.",
     "rainbow_wave": "A rainbow sweeping across the device.",
     "gradient_wave": "Your own colors sweeping across the device.",
+    "aurora": "Slow, shifting curtains of color, like the northern lights.",
+    "comet": "A bright head with a fading tail sweeping across the device.",
     "starlight": "Random keys twinkle and fade.",
     "fire": "Flames lick up from the bottom row.",
     "raindrop": "Drops streak down and splash at the bottom.",

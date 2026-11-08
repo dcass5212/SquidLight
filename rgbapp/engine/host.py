@@ -315,6 +315,7 @@ class EngineHost:
             self._settings = copy.deepcopy(groups)
             self._touch_locked()
             if self._running():
+                self.engine.begin_crossfade()  # blend from what is lit now
                 self._apply_all_locked()
 
     @property
@@ -492,6 +493,19 @@ class EngineHost:
     def set_input_options(self, audio_device: Optional[str], lhm_url: Optional[str]) -> None:
         with self._lock:
             self.engine.set_input_options(audio_device, lhm_url)
+
+    def set_away(self, away: bool) -> None:
+        """Fade the lights out (locked, idle, scheduled off) or back in. Not saved in a profile."""
+        with self._lock:
+            self.engine.set_away(away)
+
+    @property
+    def away(self) -> bool:
+        return self.engine.away
+
+    def set_fade_ms(self, ms: int) -> None:
+        with self._lock:
+            self.engine.set_fade(max(0, int(ms)) / 1000.0)
 
     def set_paused(self, paused: bool) -> None:
         with self._lock:

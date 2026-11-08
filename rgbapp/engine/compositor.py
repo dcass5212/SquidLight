@@ -35,11 +35,59 @@ def _screen(dst: np.ndarray, src: np.ndarray) -> np.ndarray:
     return 1.0 - (1.0 - dst) * (1.0 - src)
 
 
+def _subtract(dst: np.ndarray, src: np.ndarray) -> np.ndarray:
+    return np.maximum(dst - src, 0.0)
+
+
+def _darken(dst: np.ndarray, src: np.ndarray) -> np.ndarray:
+    return np.minimum(dst, src)
+
+
+def _lighten(dst: np.ndarray, src: np.ndarray) -> np.ndarray:
+    return np.maximum(dst, src)
+
+
+def _overlay(dst: np.ndarray, src: np.ndarray) -> np.ndarray:
+    # Multiply in the shadows of what is below, screen in its highlights.
+    return np.where(dst < 0.5, 2.0 * dst * src, 1.0 - 2.0 * (1.0 - dst) * (1.0 - src))
+
+
+def _difference(dst: np.ndarray, src: np.ndarray) -> np.ndarray:
+    return np.abs(dst - src)
+
+
+def _dodge(dst: np.ndarray, src: np.ndarray) -> np.ndarray:
+    # dst / (1 - src); a full-strength src lifts any non-black dst to white, black stays black.
+    denom = np.maximum(1.0 - src, np.float32(1e-6))
+    return np.minimum(dst / denom, 1.0)
+
+
+# Dict order is the order the layer row's dropdown shows.
 BLEND_MODES: dict[str, Callable[[np.ndarray, np.ndarray], np.ndarray]] = {
     "normal": _normal,
     "add": _add,
+    "subtract": _subtract,
     "multiply": _multiply,
     "screen": _screen,
+    "overlay": _overlay,
+    "darken": _darken,
+    "lighten": _lighten,
+    "difference": _difference,
+    "dodge": _dodge,
+}
+
+# Label and one-line hint per mode, for the layer row (name, tooltip).
+BLEND_INFO: dict[str, tuple[str, str]] = {
+    "normal": ("Normal", "Covers what is below"),
+    "add": ("Add", "Adds light to what is below"),
+    "subtract": ("Subtract", "Removes this layer's light from what is below"),
+    "multiply": ("Multiply", "Darkens: only light both layers share survives"),
+    "screen": ("Screen", "Brightens without clipping, like projecting both lights"),
+    "overlay": ("Overlay", "Deepens dark areas and brightens bright ones"),
+    "darken": ("Darken", "Keeps the darker of each color channel"),
+    "lighten": ("Lighten", "Keeps the lighter of each color channel"),
+    "difference": ("Difference", "Shows how far apart the two layers are"),
+    "dodge": ("Color dodge", "Pushes what is below toward white"),
 }
 
 
@@ -108,6 +156,9 @@ class Compositor:
     def render(self, ctx: Ctx) -> np.ndarray:
         n = self.group.led_count
         out = np.zeros((n, 3), dtype=np.float32)
+        # How much of each LED the layers so far have actually drawn. Where nothing is
+        # below yet, a layer has nothing to blend with and lands as Normal.
+        acc = np.zeros((n, 1), dtype=np.float32)
         for layer in self._layers:
             spec = layer.spec
             if not spec.visible or spec.opacity <= 0.0:
@@ -127,12 +178,15 @@ class Compositor:
             except Exception:
                 cov = None
             blended = BLEND_MODES[spec.blend](out, src)
+            if spec.blend != "normal":
+                blended = src + (blended - src) * acc
             weight = np.float32(min(spec.opacity, 1.0))
             if layer.mask is not None:
                 weight = weight * layer.mask[:, None].astype(np.float32)
             if cov is not None:
                 weight = weight * cov[:, None].astype(np.float32)
             out = out + (blended - out) * weight
+            acc = acc + weight * (1.0 - acc)
         return out
 
 
